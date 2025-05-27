@@ -237,6 +237,7 @@ function analyzePDF() {
     }
 
     const aiProvider = document.getElementById('ai-provider').value;
+    const contentType = document.getElementById('content-type').value;
 
     document.getElementById('analyze-btn').disabled = true;
     document.getElementById('analysis-progress').style.display = 'block';
@@ -249,7 +250,8 @@ function analyzePDF() {
         },
         body: JSON.stringify({
             filepath: currentFile.filepath,
-            ai_provider: aiProvider
+            ai_provider: aiProvider,
+            content_type: contentType
         })
     })
     .then(response => response.json())
@@ -410,11 +412,18 @@ function showImportCard() {
 
 // Populate metadata review section
 function populateMetadataReview(analysis, confidence) {
+    document.getElementById('display-content-type').textContent = 
+        analysis.content_type ? (analysis.content_type === 'novel' ? 'Novel' : 'Source Material') : 'Source Material';
     document.getElementById('display-game-type').textContent = analysis.game_type || 'Unknown';
     document.getElementById('display-edition').textContent = analysis.edition || 'Unknown';
     document.getElementById('display-book-type').textContent = analysis.book_type || 'Unknown';
     document.getElementById('display-book-title').textContent = analysis.book_full_name || analysis.book_title || 'Unknown';
     document.getElementById('display-collection').textContent = analysis.collection_name || 'Unknown';
+
+    // Set the dropdown to match the content type
+    if (document.getElementById('edit-content-type')) {
+        document.getElementById('edit-content-type').value = analysis.content_type || 'source_material';
+    }
 
     // Update confidence display
     if (confidence) {
@@ -464,6 +473,10 @@ function getConfidenceBadgeClass(confidence) {
 
 // Update path preview
 function updatePathPreview() {
+    const contentType = (document.getElementById('edit-content-type') ? 
+                         document.getElementById('edit-content-type').value : 
+                         (currentAnalysisData?.content_type || 'source_material'));
+    
     const gameType = (document.getElementById('edit-game-type').value ||
                      document.getElementById('display-game-type').textContent || 'unknown')
                      .toLowerCase().replace(/\s+/g, '_').replace(/&/g, 'and');
@@ -482,13 +495,13 @@ function updatePathPreview() {
 
     if (organizationStyle === 'separate') {
         // Separate collections approach
-        const path = `source_material.${gameType}.${edition}.${bookType}.${collection}`;
+        const path = `${contentType}.${gameType}.${edition}.${bookType}.${collection}`;
         pathTypeElement.textContent = 'Collection:';
         pathPreviewElement.textContent = path;
     } else {
         // Single collection with folder metadata approach
-        const folderPath = `${gameType}/${edition}/${bookType}/${collection}`;
-        pathTypeElement.textContent = 'Collection: source_material, Folder:';
+        const folderPath = `${contentType}/${gameType}/${edition}/${bookType}/${collection}`;
+        pathTypeElement.textContent = 'Collection: rpger, Folder:';
         pathPreviewElement.textContent = folderPath;
     }
 }
@@ -506,6 +519,7 @@ function toggleMetadataEdit() {
     edits.forEach(edit => edit.style.display = 'block');
 
     // Populate edit fields with current values
+    document.getElementById('edit-content-type').value = currentAnalysisData?.content_type || 'source_material';
     document.getElementById('edit-game-type').value = document.getElementById('display-game-type').textContent;
     document.getElementById('edit-edition').value = document.getElementById('display-edition').textContent;
     document.getElementById('edit-book-type').value = document.getElementById('display-book-type').textContent;
@@ -526,6 +540,8 @@ function toggleMetadataEdit() {
 // Save metadata changes
 function saveMetadataChanges() {
     // Update display values
+    document.getElementById('display-content-type').textContent = 
+        document.getElementById('edit-content-type').value === 'novel' ? 'Novel' : 'Source Material';
     document.getElementById('display-game-type').textContent = document.getElementById('edit-game-type').value;
     document.getElementById('display-edition').textContent = document.getElementById('edit-edition').value;
     document.getElementById('display-book-type').textContent = document.getElementById('edit-book-type').value;
@@ -534,6 +550,7 @@ function saveMetadataChanges() {
 
     // Update stored analysis data
     if (currentAnalysisData) {
+        currentAnalysisData.content_type = document.getElementById('edit-content-type').value;
         currentAnalysisData.game_type = document.getElementById('edit-game-type').value;
         currentAnalysisData.edition = document.getElementById('edit-edition').value;
         currentAnalysisData.book_type = document.getElementById('edit-book-type').value;
@@ -573,6 +590,7 @@ function getCurrentMetadata() {
     if (!currentAnalysisData) return {};
 
     return {
+        content_type: currentAnalysisData.content_type || 'source_material',
         game_type: currentAnalysisData.game_type,
         edition: currentAnalysisData.edition,
         book_type: currentAnalysisData.book_type,

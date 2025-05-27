@@ -63,7 +63,7 @@
                     </div>
                     <div class="card-body">
                         <div class="row mb-3">
-                            <div class="col-md-6">
+                            <div class="col-md-4">
                                 <label for="ai-provider" class="form-label">AI Provider</label>
                                 <select class="form-select" id="ai-provider">
                                     <option value="mock">Mock AI (Immediate)</option>
@@ -72,7 +72,15 @@
                                     <option value="local">Local LLM</option>
                                 </select>
                             </div>
-                            <div class="col-md-6 d-flex align-items-end">
+                            <div class="col-md-4">
+                                <label for="content-type" class="form-label">Content Type</label>
+                                <select class="form-select" id="content-type">
+                                    <option value="source_material">Source Material</option>
+                                    <option value="novel">Novel</option>
+                                </select>
+                                <small class="text-muted">Select content type for optimal extraction</small>
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
                                 <button class="btn btn-success" id="analyze-btn" onclick="analyzePDF()">
                                     <i class="fas fa-search"></i> Analyze PDF
                                 </button>
@@ -144,6 +152,14 @@
 
                             <div class="row">
                                 <div class="col-md-6">
+                                    <div class="mb-2">
+                                        <label class="form-label small"><strong>Content Type:</strong></label>
+                                        <div class="metadata-display" id="display-content-type"></div>
+                                        <select class="form-select form-select-sm metadata-edit" id="edit-content-type" style="display: none;">
+                                            <option value="source_material">Source Material</option>
+                                            <option value="novel">Novel</option>
+                                        </select>
+                                    </div>
                                     <div class="mb-2">
                                         <label class="form-label small"><strong>Game Type:</strong></label>
                                         <div class="metadata-display" id="display-game-type"></div>

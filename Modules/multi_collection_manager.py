@@ -5,21 +5,37 @@ Enhanced ChromaDB collection management with game-aware organization
 """
 
 import json
+import os
 import requests
 import sys
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
+# Try to import dotenv for loading environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Load environment variables from .env file if it exists
+    load_dotenv()
+except ImportError:
+    # If dotenv is not installed, continue without it
+    pass
+
 # Note: No longer dependent on static game configs - uses AI detection
 
-# ChromaDB Configuration - using your working setup
+# ChromaDB Configuration - using environment variables with fallbacks
+CHROMA_HOST = os.getenv("CHROMA_HOST", "10.202.28.49")
+CHROMA_PORT = os.getenv("CHROMA_PORT", "8000")
+CHROMA_BASE_URL = os.getenv("CHROMA_BASE_URL", f"http://{CHROMA_HOST}:{CHROMA_PORT}/api/v2")
+CHROMA_TENANT = os.getenv("CHROMA_TENANT", "default_tenant")
+CHROMA_DATABASE = os.getenv("CHROMA_DATABASE", "default_database")
+
 CHROMA_CONFIG = {
-    "host": "10.202.28.49",
-    "port": "8000",
-    "base_url": "http://10.202.28.49:8000/api/v2",
-    "tenant": "default_tenant",
-    "database": "default_database"
+    "host": CHROMA_HOST,
+    "port": CHROMA_PORT,
+    "base_url": CHROMA_BASE_URL,
+    "tenant": CHROMA_TENANT,
+    "database": CHROMA_DATABASE
 }
 
 class MultiGameCollectionManager:

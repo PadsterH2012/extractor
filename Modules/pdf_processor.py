@@ -6,10 +6,11 @@ Enhanced PDF extraction with game-aware processing
 
 import json
 import logging
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 import fitz  # PyMuPDF
 import pdfplumber
@@ -78,6 +79,9 @@ class MultiGamePDFProcessor:
             # Use AI detection
             game_metadata = self.game_detector.analyze_game_metadata(pdf_path)
 
+        # Extract ISBN from PDF metadata and content
+        isbn_data = self._extract_isbn(doc, pdf_path)
+        
         # Log detected information
         self.logger.info(f"🎮 Game: {game_metadata['game_type']}")
         self.logger.info(f"📖 Edition: {game_metadata['edition']}")
@@ -89,8 +93,8 @@ class MultiGamePDFProcessor:
 
         doc.close()
 
-        # Build complete metadata
-        complete_metadata = self._build_complete_metadata(pdf_path, game_metadata)
+        # Build complete metadata with ISBN
+        complete_metadata = self._build_complete_metadata(pdf_path, game_metadata, isbn_data)
 
         self.logger.info(f"Extracted {len(extracted_sections)} sections")
 
@@ -305,10 +309,10 @@ class MultiGamePDFProcessor:
 
         return tables
 
-    def _build_complete_metadata(self, pdf_path: Path, game_metadata: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_complete_metadata(self, pdf_path: Path, game_metadata: Dict[str, Any], isbn_data: Dict[str, Any] = None) -> Dict[str, Any]:
         """Build complete metadata including file and AI-detected game information"""
 
-        return {
+        metadata = {
             "original_filename": pdf_path.name,
             "file_size": pdf_path.stat().st_size,
             "source_type": "pdf_extraction",
@@ -335,6 +339,194 @@ class MultiGamePDFProcessor:
             "detected_categories": game_metadata.get("detected_categories", []),
             "language": game_metadata.get("language", "English")
         }
+        
+        # Add ISBN information if available
+        if isbn_data:
+            if isbn_data.get("isbn"):
+                metadata["isbn"] = isbn_data["isbn"]
+            if isbn_data.get("isbn_10"):
+                metadata["isbn_10"] = isbn_data["isbn_10"]
+            if isbn_data.get("isbn_13"):
+                metadata["isbn_13"] = isbn_data["isbn_13"]
+            if isbn_data.get("source"):
+                metadata["isbn_source"] = isbn_data["source"]
+
+        return metadata
+
+    def _extract_isbn(self, doc, pdf_path: Path) -> Dict[str, Any]:
+        """
+        Extract ISBN numbers from PDF metadata and content
+
+        This extracts both ISBN-10 and ISBN-13 numbers and validates them.
+        It checks both PDF metadata and the first few pages of content.
+
+        Args:
+            doc: PyMuPDF document object
+            pdf_path: Path to PDF file
+
+        Returns:
+            Dictionary with ISBN information
+        """
+        isbn_data = {
+            "isbn_10": None, 
+            "isbn_13": None,
+            "isbn": None,  # Primary ISBN (prefers ISBN-13 if available)
+            "source": None  # Where the ISBN was found (metadata or content)
+        }
+
+        # First try to extract from PDF metadata
+        if doc.metadata:
+            # Look for standard metadata fields that might contain ISBN
+            for field in ["subject", "keywords"]:
+                if field in doc.metadata and doc.metadata[field]:
+                    isbns = self._find_isbns_in_text(doc.metadata[field])
+                    if isbns:
+                        self._update_isbn_data(isbn_data, isbns, source="pdf_metadata")
+                        break
+
+        # If no ISBN found in metadata, try content of first few pages
+        if not isbn_data["isbn"]:
+            max_pages_to_check = min(5, len(doc))  # Check first 5 pages or all if less
+            for page_num in range(max_pages_to_check):
+                page = doc[page_num]
+                text = page.get_text()
+                isbns = self._find_isbns_in_text(text)
+                if isbns:
+                    self._update_isbn_data(isbn_data, isbns, source="content_page_" + str(page_num + 1))
+                    break
+
+        if isbn_data["isbn"]:
+            self.logger.info(f"📚 ISBN: {isbn_data['isbn']} (source: {isbn_data['source']})")
+        else:
+            self.logger.info("No valid ISBN found in document")
+
+        return isbn_data
+
+    def _find_isbns_in_text(self, text: str) -> Dict[str, str]:
+        """
+        Find ISBN-10 and ISBN-13 numbers in text
+        
+        Args:
+            text: Text content to search
+            
+        Returns:
+            Dictionary with found ISBN-10 and ISBN-13
+        """
+        found_isbns = {}
+        
+        # More robust patterns for ISBN detection
+        isbn_patterns = [
+            # ISBN-10 with prefix
+            r'ISBN(?:-10)?[:\s]+([\d][\d-]{8,}[\dXx])',
+            
+            # ISBN-13 with prefix (specifically capturing full 13-digit pattern)
+            r'ISBN-13[:\s]+([\d][\d-]{11,}[\d])',
+            
+            # ISBN-10 without prefix (standalone)
+            r'(?<!\d)([\d][\d-]{8,}[\dXx])(?!\d)',
+            
+            # ISBN-13 without prefix (standalone)
+            r'(?<!\d)([\d][\d-]{11,}[\d])(?!\d)',
+        ]
+        
+        for pattern in isbn_patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE)
+            for match in matches:
+                # Clean up the ISBN by removing spaces and hyphens
+                raw_isbn = match.group(1).strip()
+                clean_isbn = raw_isbn.replace('-', '').replace(' ', '')
+                
+                # Validate the ISBN format and checksum
+                if len(clean_isbn) == 10 and self._validate_isbn_10(clean_isbn):
+                    found_isbns["isbn_10"] = clean_isbn
+                elif len(clean_isbn) == 13 and self._validate_isbn_13(clean_isbn):
+                    found_isbns["isbn_13"] = clean_isbn
+        
+        return found_isbns
+
+    def _update_isbn_data(self, isbn_data: Dict[str, str], new_isbns: Dict[str, str], source: str) -> None:
+        """
+        Update ISBN data dictionary with new ISBNs
+        
+        Args:
+            isbn_data: Existing ISBN data dictionary to update
+            new_isbns: New ISBNs found
+            source: Source of the ISBNs
+        """
+        # Update ISBN-10 and ISBN-13 if found
+        if "isbn_10" in new_isbns and new_isbns["isbn_10"]:
+            isbn_data["isbn_10"] = new_isbns["isbn_10"]
+            
+        if "isbn_13" in new_isbns and new_isbns["isbn_13"]:
+            isbn_data["isbn_13"] = new_isbns["isbn_13"]
+        
+        # Set the primary ISBN (prefer ISBN-13 over ISBN-10)
+        if isbn_data["isbn_13"]:
+            isbn_data["isbn"] = isbn_data["isbn_13"]
+        elif isbn_data["isbn_10"]:
+            isbn_data["isbn"] = isbn_data["isbn_10"]
+        
+        # Set the source if an ISBN was found
+        if isbn_data["isbn"] and not isbn_data["source"]:
+            isbn_data["source"] = source
+
+    def _validate_isbn_10(self, isbn: str) -> bool:
+        """
+        Validate an ISBN-10 number
+        
+        Args:
+            isbn: ISBN-10 string (digits only with possible 'X' at the end)
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        if len(isbn) != 10:
+            return False
+        
+        # Check if all characters are digits or the last one is 'X'/'x'
+        if not all(c.isdigit() for c in isbn[:-1]) or (isbn[-1].upper() != 'X' and not isbn[-1].isdigit()):
+            return False
+        
+        # Calculate checksum
+        checksum = 0
+        for i in range(9):
+            checksum += (10 - i) * int(isbn[i])
+        
+        # Handle the last digit/character
+        if isbn[-1].upper() == 'X':
+            checksum += 10
+        else:
+            checksum += int(isbn[-1])
+        
+        # Valid if checksum is divisible by 11
+        return checksum % 11 == 0
+
+    def _validate_isbn_13(self, isbn: str) -> bool:
+        """
+        Validate an ISBN-13 number
+        
+        Args:
+            isbn: ISBN-13 string (digits only)
+            
+        Returns:
+            True if valid, False otherwise
+        """
+        if len(isbn) != 13:
+            return False
+        
+        # Check if all characters are digits
+        if not isbn.isdigit():
+            return False
+        
+        # Calculate checksum using ISBN-13 algorithm
+        checksum = 0
+        for i in range(12):
+            checksum += int(isbn[i]) * (1 if i % 2 == 0 else 3)
+        
+        check_digit = (10 - (checksum % 10)) % 10
+        
+        # Valid if calculated check digit matches the last digit
+        return check_digit == int(isbn[-1])
 
     def _build_extraction_summary(self, sections: List[Dict], game_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Build extraction summary with game context"""
@@ -348,7 +540,7 @@ class MultiGamePDFProcessor:
             category = section["category"]
             categories[category] = categories.get(category, 0) + 1
 
-        return {
+        summary = {
             "total_pages": len(sections),
             "total_words": total_words,
             "total_tables": total_tables,
@@ -358,8 +550,19 @@ class MultiGamePDFProcessor:
             "book": game_metadata.get("book_type", "Unknown"),
             "collection_name": game_metadata["collection_name"],
             "category_distribution": categories,
-            "average_words_per_page": total_words // len(sections) if sections else 0
+            "average_words_per_page": total_words // len(sections) if sections else 0,
+            "has_isbn": "isbn" in game_metadata
         }
+        
+        # Add ISBN information if present in game_metadata
+        if "isbn" in game_metadata:
+            summary["isbn"] = game_metadata["isbn"]
+            if "isbn_10" in game_metadata:
+                summary["isbn_10"] = game_metadata["isbn_10"]
+            if "isbn_13" in game_metadata:
+                summary["isbn_13"] = game_metadata["isbn_13"]
+            
+        return summary
 
     def save_extraction(self, extraction_data: Dict, output_dir: Path) -> Dict[str, Path]:
         """Save extraction in multiple formats"""
@@ -426,6 +629,14 @@ class MultiGamePDFProcessor:
                 "extraction_confidence": section["extraction_confidence"],
                 "processing_date": metadata["processing_date"]
             }
+            
+            # Add ISBN information if available
+            if "isbn" in metadata:
+                doc_metadata["isbn"] = metadata["isbn"]
+            if "isbn_10" in metadata:
+                doc_metadata["isbn_10"] = metadata["isbn_10"]
+            if "isbn_13" in metadata:
+                doc_metadata["isbn_13"] = metadata["isbn_13"]
 
             # Add table information if present
             if section["tables"]:

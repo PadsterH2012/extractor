@@ -96,7 +96,7 @@ Each game system includes:
 
 ### Prerequisites
 - Python 3.8+
-- ChromaDB v0.6.3+ running at `10.202.28.49:8000`
+- ChromaDB v0.6.3+
 - Required Python packages (see `requirements.txt`)
 - **AI Provider** (optional - mock AI works by default)
 

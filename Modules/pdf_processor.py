@@ -47,7 +47,7 @@ class MultiGamePDFProcessor:
         self.logger = logging.getLogger(__name__)
 
     def extract_pdf(self, pdf_path: Path, force_game_type: Optional[str] = None,
-                   force_edition: Optional[str] = None) -> Dict[str, Any]:
+                   force_edition: Optional[str] = None, content_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Extract content from a single PDF with game-aware processing
 
@@ -55,6 +55,7 @@ class MultiGamePDFProcessor:
             pdf_path: Path to PDF file
             force_game_type: Override game type detection
             force_edition: Override edition detection
+            content_type: Type of content ('source_material' or 'novel')
 
         Returns:
             Extraction data with game metadata
@@ -77,11 +78,18 @@ class MultiGamePDFProcessor:
         else:
             # Use AI detection
             game_metadata = self.game_detector.analyze_game_metadata(pdf_path)
+        
+        # Add content type to metadata
+        if content_type:
+            game_metadata['content_type'] = content_type
+        else:
+            game_metadata['content_type'] = 'source_material'  # Default
 
         # Log detected information
         self.logger.info(f"🎮 Game: {game_metadata['game_type']}")
         self.logger.info(f"📖 Edition: {game_metadata['edition']}")
         self.logger.info(f"📚 Book: {game_metadata.get('book_type', 'Unknown')}")
+        self.logger.info(f"📑 Content Type: {game_metadata['content_type']}")
         self.logger.info(f"🏷️  Collection: {game_metadata['collection_name']}")
 
         # Extract content with game context
@@ -353,6 +361,7 @@ class MultiGamePDFProcessor:
             "total_words": total_words,
             "total_tables": total_tables,
             "extraction_timestamp": datetime.now().isoformat(),
+            "content_type": game_metadata.get("content_type", "source_material"),
             "game_type": game_metadata["game_type"],
             "edition": game_metadata["edition"],
             "book": game_metadata.get("book_type", "Unknown"),

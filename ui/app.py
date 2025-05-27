@@ -9,6 +9,7 @@ import sys
 import json
 import logging
 import requests
+import shutil
 from pathlib import Path
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_file, flash, redirect, url_for
@@ -112,14 +113,35 @@ def upload_file():
 
 @app.route('/analyze', methods=['POST'])
 def analyze_pdf():
-    """Analyze PDF content using AI"""
+    """Analyze PDF content using AI with confidence testing"""
     try:
         data = request.get_json()
         filepath = data.get('filepath')
         ai_provider = data.get('ai_provider', 'mock')
+        run_confidence_test = data.get('run_confidence_test', True)
 
         if not filepath or not os.path.exists(filepath):
             return jsonify({'error': 'File not found'}), 400
+
+        # Run confidence test first if requested
+        confidence_results = None
+        if run_confidence_test:
+            try:
+                sys.path.append(str(Path(__file__).parent.parent / 'archive'))
+                from confidence_tester import run_quick_test
+
+                logger.info("Running confidence test...")
+                confidence_results = run_quick_test(filepath, pages_to_test=3)
+                logger.info(f"Confidence test complete: {confidence_results['quick_confidence']:.1f}%")
+            except Exception as e:
+                logger.warning(f"Confidence test failed: {e}")
+                confidence_results = {
+                    'quick_confidence': 75.0,  # Default assumption
+                    'recommended_method': 'text',
+                    'text_confidence': 75.0,
+                    'layout_confidence': 75.0,
+                    'issues': [f'Confidence test unavailable: {str(e)}']
+                }
 
         # Initialize AI detector with enhanced analysis
         ai_config = {
@@ -140,6 +162,12 @@ def analyze_pdf():
         # Perform AI analysis
         game_metadata = detector.analyze_game_metadata(Path(filepath))
 
+        # Add confidence information to game metadata
+        if confidence_results:
+            game_metadata['extraction_confidence'] = confidence_results['quick_confidence']
+            game_metadata['recommended_method'] = confidence_results['recommended_method']
+            game_metadata['confidence_issues'] = confidence_results.get('issues', [])
+
         # Store results for later use
         session_id = str(hash(filepath))
         analysis_results[session_id] = {
@@ -148,13 +176,15 @@ def analyze_pdf():
             'game_metadata': game_metadata,
             'ai_provider': ai_provider,
             'analysis_time': datetime.now().isoformat(),
-            'extracted_text': extracted_content.get('combined_text', '')  # Store extracted text for copy functionality
+            'extracted_text': extracted_content.get('combined_text', ''),  # Store extracted text for copy functionality
+            'confidence_results': confidence_results
         }
 
         return jsonify({
             'success': True,
             'session_id': session_id,
-            'analysis': game_metadata
+            'analysis': game_metadata,
+            'confidence': confidence_results
         })
 
     except Exception as e:
@@ -724,6 +754,108 @@ def query_game_edition():
 
     except Exception as e:
         logger.error(f"Game edition query error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/get_settings', methods=['GET'])
+def get_settings():
+    """Get current settings from .env file"""
+    try:
+        env_path = Path(__file__).parent.parent / '.env'
+        env_sample_path = Path(__file__).parent.parent / '.env.sample'
+
+        # If .env doesn't exist, copy from .env.sample
+        if not env_path.exists() and env_sample_path.exists():
+            shutil.copy2(env_sample_path, env_path)
+            logger.info("Created .env file from .env.sample")
+
+        settings = {}
+
+        # Read .env file if it exists
+        if env_path.exists():
+            with open(env_path, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        # Remove quotes if present
+                        value = value.strip('"\'')
+                        settings[key.strip()] = value
+
+        return jsonify({
+            'success': True,
+            'settings': settings
+        })
+
+    except Exception as e:
+        logger.error(f"Settings load error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/save_settings', methods=['POST'])
+def save_settings():
+    """Save settings to .env file"""
+    try:
+        data = request.get_json()
+        new_settings = data.get('settings', {})
+
+        env_path = Path(__file__).parent.parent / '.env'
+        env_sample_path = Path(__file__).parent.parent / '.env.sample'
+
+        # If .env doesn't exist, copy from .env.sample
+        if not env_path.exists() and env_sample_path.exists():
+            shutil.copy2(env_sample_path, env_path)
+            logger.info("Created .env file from .env.sample")
+
+        # Read existing settings
+        if env_path.exists():
+            with open(env_path, 'r') as f:
+                lines = f.readlines()
+        else:
+            lines = []
+
+        # Parse existing lines
+        updated_lines = []
+        updated_keys = set()
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#') and '=' in stripped:
+                key = stripped.split('=', 1)[0].strip()
+                if key in new_settings:
+                    # Update existing setting
+                    value = new_settings[key]
+                    # Add quotes if value contains spaces or special characters
+                    if ' ' in value or any(char in value for char in ['$', '&', '|', ';']):
+                        value = f'"{value}"'
+                    updated_lines.append(f"{key}={value}\n")
+                    updated_keys.add(key)
+                else:
+                    # Keep existing line
+                    updated_lines.append(line)
+            else:
+                # Keep comments and empty lines
+                updated_lines.append(line)
+
+        # Add new settings that weren't in the file
+        for key, value in new_settings.items():
+            if key not in updated_keys and value:  # Only add non-empty values
+                # Add quotes if value contains spaces or special characters
+                if ' ' in value or any(char in value for char in ['$', '&', '|', ';']):
+                    value = f'"{value}"'
+                updated_lines.append(f"{key}={value}\n")
+
+        # Write updated .env file
+        with open(env_path, 'w') as f:
+            f.writelines(updated_lines)
+
+        logger.info("Settings saved to .env file")
+
+        return jsonify({
+            'success': True,
+            'message': 'Settings saved successfully'
+        })
+
+    except Exception as e:
+        logger.error(f"Settings save error: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

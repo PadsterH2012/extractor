@@ -15,6 +15,9 @@
                 <i class="fas fa-robot"></i> AI-Powered Extraction v3
             </span>
             <div class="d-flex">
+                <button class="btn btn-outline-light btn-sm me-2" onclick="openSettings()">
+                    <i class="fas fa-cog"></i> Settings
+                </button>
                 <button class="btn btn-outline-light btn-sm" onclick="checkStatus()">
                     <i class="fas fa-heartbeat"></i> Status
                 </button>
@@ -182,6 +185,16 @@
                                             <span id="path-type">Collection:</span> rpger.<span id="path-preview">...</span>
                                         </div>
                                     </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small"><strong>Extraction Confidence:</strong></label>
+                                        <div class="metadata-display" id="display-extraction-confidence">
+                                            <span id="extraction-confidence-value">Testing...</span>
+                                            <span class="badge ms-2" id="extraction-confidence-grade">-</span>
+                                        </div>
+                                        <div class="small text-muted mt-1" id="confidence-details" style="display: none;">
+                                            <div>Text: <span id="text-confidence">-</span>% | Layout: <span id="layout-confidence">-</span>% | Method: <span id="recommended-method">-</span></div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
@@ -295,6 +308,139 @@
                             <li><i class="fas fa-check text-success"></i> ChromaDB enables vector search</li>
                             <li><i class="fas fa-check text-success"></i> Download results for backup</li>
                         </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="modal fade" id="settingsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="fas fa-cog"></i> System Settings
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row">
+                        <!-- AI Configuration -->
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-brain"></i> AI Configuration</h6>
+                            <div class="mb-3">
+                                <label class="form-label">Anthropic API Key</label>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" id="anthropic-api-key" placeholder="sk-ant-...">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('anthropic-api-key')">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <small class="text-muted">For Claude AI provider</small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">OpenAI API Key</label>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" id="openai-api-key" placeholder="sk-...">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('openai-api-key')">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <small class="text-muted">For OpenAI GPT-4 provider</small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Local LLM URL</label>
+                                <input type="text" class="form-control" id="local-llm-url" placeholder="http://localhost:11434">
+                                <small class="text-muted">For Ollama or other local LLM</small>
+                            </div>
+                        </div>
+
+                        <!-- Database Configuration -->
+                        <div class="col-md-6">
+                            <h6><i class="fas fa-database"></i> Database Configuration</h6>
+                            <div class="mb-3">
+                                <label class="form-label">ChromaDB Host</label>
+                                <input type="text" class="form-control" id="chromadb-host" placeholder="10.202.28.49">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">ChromaDB Port</label>
+                                <input type="number" class="form-control" id="chromadb-port" placeholder="8000">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">MongoDB Host</label>
+                                <input type="text" class="form-control" id="mongodb-host" placeholder="10.202.28.46">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">MongoDB Port</label>
+                                <input type="number" class="form-control" id="mongodb-port" placeholder="27017">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">MongoDB Database</label>
+                                <input type="text" class="form-control" id="mongodb-database" placeholder="rpger">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Advanced Settings -->
+                    <div class="row mt-4">
+                        <div class="col-12">
+                            <h6><i class="fas fa-sliders-h"></i> Advanced Settings</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">AI Temperature</label>
+                                        <input type="range" class="form-range" id="ai-temperature" min="0" max="1" step="0.1" value="0.3">
+                                        <small class="text-muted">Creativity level: <span id="temperature-value">0.3</span></small>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Max Tokens</label>
+                                        <input type="number" class="form-control" id="ai-max-tokens" placeholder="4000">
+                                        <small class="text-muted">Maximum response length</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-3">
+                                        <label class="form-label">Request Timeout (seconds)</label>
+                                        <input type="number" class="form-control" id="ai-timeout" placeholder="60">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Max Retries</label>
+                                        <input type="number" class="form-control" id="ai-retries" placeholder="3">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-info mt-3">
+                        <i class="fas fa-info-circle"></i>
+                        <strong>Note:</strong> Settings are saved to .env file. If .env doesn't exist, it will be created from .env.sample.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveSettings()">
+                        <i class="fas fa-save"></i> Save Settings
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Database Browser Modal -->
+    <div class="modal fade" id="databaseModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="databaseModalTitle">
+                        <i class="fas fa-database"></i> Database Browser
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="database-browser-content">
+                        <!-- Database browser content will be loaded here -->
                     </div>
                 </div>
             </div>

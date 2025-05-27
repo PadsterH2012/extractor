@@ -8,6 +8,14 @@ let currentSessionId = null;
 document.addEventListener('DOMContentLoaded', function() {
     initializeFileUpload();
     checkStatus();
+
+    // Initialize temperature slider
+    const temperatureSlider = document.getElementById('ai-temperature');
+    if (temperatureSlider) {
+        temperatureSlider.addEventListener('input', function() {
+            document.getElementById('temperature-value').textContent = this.value;
+        });
+    }
 });
 
 // File Upload Handling
@@ -251,7 +259,7 @@ function analyzePDF() {
 
         if (data.success) {
             currentSessionId = data.session_id;
-            displayAnalysisResults(data.analysis);
+            displayAnalysisResults(data.analysis, data.confidence);
             updateProgress('analyze', 'completed');
             showExtractionCard();
             showToast('Analysis completed successfully', 'success');
@@ -271,13 +279,13 @@ function analyzePDF() {
 let currentAnalysisData = null;
 
 // Display analysis results
-function displayAnalysisResults(analysis) {
+function displayAnalysisResults(analysis, confidence) {
     // Store analysis data for metadata editing
     currentAnalysisData = analysis;
 
-    const confidence = analysis.confidence || 0;
-    const confidenceClass = confidence > 0.8 ? 'confidence-high' :
-                           confidence > 0.5 ? 'confidence-medium' : 'confidence-low';
+    const aiConfidence = analysis.confidence || 0;
+    const confidenceClass = aiConfidence > 0.8 ? 'confidence-high' :
+                           aiConfidence > 0.5 ? 'confidence-medium' : 'confidence-low';
 
     const resultsHtml = `
         <div class="analysis-detail">
@@ -301,9 +309,9 @@ function displayAnalysisResults(analysis) {
             <span class="analysis-value">${analysis.collection_name || 'Unknown'}</span>
         </div>
         <div class="analysis-detail">
-            <span class="analysis-label">Confidence:</span>
+            <span class="analysis-label">AI Confidence:</span>
             <span class="confidence-badge ${confidenceClass}">
-                ${Math.round(confidence * 100)}%
+                ${Math.round(aiConfidence * 100)}%
             </span>
         </div>
     `;
@@ -311,8 +319,8 @@ function displayAnalysisResults(analysis) {
     document.getElementById('analysis-details').innerHTML = resultsHtml;
     document.getElementById('analysis-results').style.display = 'block';
 
-    // Populate metadata review section
-    populateMetadataReview(analysis);
+    // Populate metadata review section with confidence data
+    populateMetadataReview(analysis, confidence);
 }
 
 // Show extraction card
@@ -401,18 +409,57 @@ function showImportCard() {
 }
 
 // Populate metadata review section
-function populateMetadataReview(analysis) {
+function populateMetadataReview(analysis, confidence) {
     document.getElementById('display-game-type').textContent = analysis.game_type || 'Unknown';
     document.getElementById('display-edition').textContent = analysis.edition || 'Unknown';
     document.getElementById('display-book-type').textContent = analysis.book_type || 'Unknown';
     document.getElementById('display-book-title').textContent = analysis.book_full_name || analysis.book_title || 'Unknown';
     document.getElementById('display-collection').textContent = analysis.collection_name || 'Unknown';
 
+    // Update confidence display
+    if (confidence) {
+        const confidenceValue = confidence.quick_confidence || 75;
+        const grade = getConfidenceGrade(confidenceValue);
+        const badgeClass = getConfidenceBadgeClass(confidenceValue);
+
+        document.getElementById('extraction-confidence-value').textContent = `${confidenceValue.toFixed(1)}%`;
+        document.getElementById('extraction-confidence-grade').textContent = grade;
+        document.getElementById('extraction-confidence-grade').className = `badge ms-2 ${badgeClass}`;
+
+        // Update detailed confidence info
+        document.getElementById('text-confidence').textContent = (confidence.text_confidence || 75).toFixed(1);
+        document.getElementById('layout-confidence').textContent = (confidence.layout_confidence || 75).toFixed(1);
+        document.getElementById('recommended-method').textContent = confidence.recommended_method || 'text';
+
+        // Show details if confidence is low
+        if (confidenceValue < 80) {
+            document.getElementById('confidence-details').style.display = 'block';
+        }
+    }
+
     // Update path preview
     updatePathPreview();
 
     // Show metadata review section
     document.getElementById('metadata-review').style.display = 'block';
+}
+
+// Get confidence grade letter
+function getConfidenceGrade(confidence) {
+    if (confidence >= 90) return 'A';
+    if (confidence >= 80) return 'B';
+    if (confidence >= 70) return 'C';
+    if (confidence >= 60) return 'D';
+    return 'F';
+}
+
+// Get confidence badge CSS class
+function getConfidenceBadgeClass(confidence) {
+    if (confidence >= 90) return 'bg-success';
+    if (confidence >= 80) return 'bg-primary';
+    if (confidence >= 70) return 'bg-warning';
+    if (confidence >= 60) return 'bg-danger';
+    return 'bg-dark';
 }
 
 // Update path preview
@@ -986,6 +1033,116 @@ function showToast(message, type = 'info') {
     // Show toast
     const bsToast = new bootstrap.Toast(toast);
     bsToast.show();
+}
+
+// Settings Management
+function openSettings() {
+    // Load current settings
+    loadSettings();
+
+    // Show modal
+    const settingsModal = new bootstrap.Modal(document.getElementById('settingsModal'));
+    settingsModal.show();
+}
+
+function loadSettings() {
+    fetch('/get_settings')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                const settings = data.settings;
+
+                // AI Configuration
+                document.getElementById('anthropic-api-key').value = settings.ANTHROPIC_API_KEY || '';
+                document.getElementById('openai-api-key').value = settings.OPENAI_API_KEY || '';
+                document.getElementById('local-llm-url').value = settings.LOCAL_LLM_URL || 'http://localhost:11434';
+
+                // Database Configuration
+                document.getElementById('chromadb-host').value = settings.CHROMADB_HOST || '10.202.28.49';
+                document.getElementById('chromadb-port').value = settings.CHROMADB_PORT || '8000';
+                document.getElementById('mongodb-host').value = settings.MONGODB_HOST || '10.202.28.46';
+                document.getElementById('mongodb-port').value = settings.MONGODB_PORT || '27017';
+                document.getElementById('mongodb-database').value = settings.MONGODB_DATABASE || 'rpger';
+
+                // Advanced Settings
+                const temperature = parseFloat(settings.AI_TEMPERATURE || '0.3');
+                document.getElementById('ai-temperature').value = temperature;
+                document.getElementById('temperature-value').textContent = temperature;
+                document.getElementById('ai-max-tokens').value = settings.AI_MAX_TOKENS || '4000';
+                document.getElementById('ai-timeout').value = settings.AI_TIMEOUT || '60';
+                document.getElementById('ai-retries').value = settings.AI_RETRIES || '3';
+            } else {
+                showToast('Failed to load settings: ' + data.error, 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Settings load error:', error);
+            showToast('Failed to load settings', 'error');
+        });
+}
+
+function saveSettings() {
+    const settings = {
+        // AI Configuration
+        ANTHROPIC_API_KEY: document.getElementById('anthropic-api-key').value,
+        OPENAI_API_KEY: document.getElementById('openai-api-key').value,
+        LOCAL_LLM_URL: document.getElementById('local-llm-url').value,
+
+        // Database Configuration
+        CHROMADB_HOST: document.getElementById('chromadb-host').value,
+        CHROMADB_PORT: document.getElementById('chromadb-port').value,
+        MONGODB_HOST: document.getElementById('mongodb-host').value,
+        MONGODB_PORT: document.getElementById('mongodb-port').value,
+        MONGODB_DATABASE: document.getElementById('mongodb-database').value,
+
+        // Advanced Settings
+        AI_TEMPERATURE: document.getElementById('ai-temperature').value,
+        AI_MAX_TOKENS: document.getElementById('ai-max-tokens').value,
+        AI_TIMEOUT: document.getElementById('ai-timeout').value,
+        AI_RETRIES: document.getElementById('ai-retries').value
+    };
+
+    fetch('/save_settings', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ settings: settings })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('Settings saved successfully!', 'success');
+
+            // Close modal
+            const settingsModal = bootstrap.Modal.getInstance(document.getElementById('settingsModal'));
+            settingsModal.hide();
+
+            // Refresh status to show updated connections
+            setTimeout(() => {
+                checkStatus();
+            }, 1000);
+        } else {
+            showToast('Failed to save settings: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Settings save error:', error);
+        showToast('Failed to save settings', 'error');
+    });
+}
+
+function togglePasswordVisibility(fieldId) {
+    const field = document.getElementById(fieldId);
+    const button = field.nextElementSibling.querySelector('i');
+
+    if (field.type === 'password') {
+        field.type = 'text';
+        button.className = 'fas fa-eye-slash';
+    } else {
+        field.type = 'password';
+        button.className = 'fas fa-eye';
+    }
 }
 
 // Utility function to format file size

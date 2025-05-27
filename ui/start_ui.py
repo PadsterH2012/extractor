@@ -79,8 +79,8 @@ def main():
     # Check if we're in the right directory
     current_dir = Path.cwd()
     if not (current_dir / "ui" / "app.py").exists():
-        print("❌ Please run this script from the Extractionv3 directory:")
-        print("   cd /mnt/network_repo/rule_book/extraction tool/Extractionv3")
+        print("❌ Please run this script from the extractor directory:")
+        print("   cd extractor")
         print("   python ui/start_ui.py")
         sys.exit(1)
 

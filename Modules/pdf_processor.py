@@ -17,6 +17,7 @@ import pdfplumber
 
 from .ai_game_detector import AIGameDetector
 from .ai_categorizer import AICategorizer
+from .text_quality_enhancer import TextQualityEnhancer
 
 class MultiGamePDFProcessor:
     """Enhanced PDF processor with AI-powered multi-game support"""
@@ -31,7 +32,16 @@ class MultiGamePDFProcessor:
         self.game_detector = AIGameDetector(ai_config=self.ai_config, debug=debug)
         self.categorizer = AICategorizer(ai_config=self.ai_config, debug=debug)
 
+        # Initialize text quality enhancer
+        self.text_enhancer = TextQualityEnhancer(self.ai_config)
+
+        # Text quality settings
+        self.enable_text_enhancement = self.ai_config.get('enable_text_enhancement', True)
+        self.aggressive_cleanup = self.ai_config.get('aggressive_cleanup', False)
+
         self.logger.info(f"AI-Powered Multi-Game PDF Processor initialized (Provider: {self.ai_config['provider']})")
+        if self.enable_text_enhancement:
+            self.logger.info("✨ Text quality enhancement enabled")
 
     def setup_logging(self):
         """Setup logging configuration"""
@@ -48,7 +58,7 @@ class MultiGamePDFProcessor:
         self.logger = logging.getLogger(__name__)
 
     def extract_pdf(self, pdf_path: Path, force_game_type: Optional[str] = None,
-                   force_edition: Optional[str] = None) -> Dict[str, Any]:
+                   force_edition: Optional[str] = None, content_type: Optional[str] = None) -> Dict[str, Any]:
         """
         Extract content from a single PDF with game-aware processing
 
@@ -56,6 +66,7 @@ class MultiGamePDFProcessor:
             pdf_path: Path to PDF file
             force_game_type: Override game type detection
             force_edition: Override edition detection
+            content_type: Type of content ('source_material' or 'novel')
 
         Returns:
             Extraction data with game metadata
@@ -78,6 +89,12 @@ class MultiGamePDFProcessor:
         else:
             # Use AI detection
             game_metadata = self.game_detector.analyze_game_metadata(pdf_path)
+        
+        # Add content type to metadata
+        if content_type:
+            game_metadata['content_type'] = content_type
+        else:
+            game_metadata['content_type'] = 'source_material'  # Default
 
         # Extract ISBN from PDF metadata and content
         isbn_data = self._extract_isbn(doc, pdf_path)
@@ -86,6 +103,7 @@ class MultiGamePDFProcessor:
         self.logger.info(f"🎮 Game: {game_metadata['game_type']}")
         self.logger.info(f"📖 Edition: {game_metadata['edition']}")
         self.logger.info(f"📚 Book: {game_metadata.get('book_type', 'Unknown')}")
+        self.logger.info(f"📑 Content Type: {game_metadata['content_type']}")
         self.logger.info(f"🏷️  Collection: {game_metadata['collection_name']}")
 
         # Extract content with game context
@@ -139,6 +157,19 @@ class MultiGamePDFProcessor:
                 if is_multi_column:
                     text = self._process_multi_column_text(blocks, page.rect.width)
 
+                # Apply text quality enhancement if enabled
+                original_text = text
+                text_quality_result = None
+                if self.enable_text_enhancement and text.strip():
+                    text_quality_result = self.text_enhancer.enhance_text_quality(
+                        text, aggressive=self.aggressive_cleanup
+                    )
+                    text = text_quality_result.cleaned_text
+
+                    if self.debug and text_quality_result:
+                        quality_summary = self.text_enhancer.get_quality_summary(text_quality_result)
+                        self.logger.debug(f"Page {page_num + 1} quality: {quality_summary['before']['score']}% → {quality_summary['after']['score']}% ({quality_summary['before']['grade']} → {quality_summary['after']['grade']})")
+
                 # Extract tables
                 tables = self._extract_tables_from_page(doc.name, page_num)
                 total_tables += len(tables)
@@ -166,6 +197,20 @@ class MultiGamePDFProcessor:
                     "edition": game_metadata["edition"],
                     "book": game_metadata.get("book_type", "Unknown")
                 }
+
+                # Add text quality metadata if enhancement was applied
+                if text_quality_result:
+                    quality_summary = self.text_enhancer.get_quality_summary(text_quality_result)
+                    section.update({
+                        "text_quality_enhanced": True,
+                        "text_quality_before": quality_summary["before"],
+                        "text_quality_after": quality_summary["after"],
+                        "text_quality_improvement": quality_summary["improvement"],
+                        "corrections_made": len(text_quality_result.corrections_made),
+                        "cleanup_aggressive": self.aggressive_cleanup
+                    })
+                else:
+                    section["text_quality_enhanced"] = False
 
                 sections.append(section)
 
@@ -545,6 +590,7 @@ class MultiGamePDFProcessor:
             "total_words": total_words,
             "total_tables": total_tables,
             "extraction_timestamp": datetime.now().isoformat(),
+            "content_type": game_metadata.get("content_type", "source_material"),
             "game_type": game_metadata["game_type"],
             "edition": game_metadata["edition"],
             "book": game_metadata.get("book_type", "Unknown"),

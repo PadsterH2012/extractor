@@ -39,6 +39,59 @@ logger = logging.getLogger(__name__)
 analysis_results = {}
 extraction_results = {}
 
+def calculate_text_quality_metrics(sections):
+    """Calculate aggregated text quality metrics from sections"""
+    if not sections:
+        return None
+
+    enhanced_sections = [s for s in sections if s.get('text_quality_enhanced', False)]
+
+    if not enhanced_sections:
+        return {
+            'enabled': False,
+            'message': 'Text quality enhancement was not enabled'
+        }
+
+    # Aggregate metrics
+    total_sections = len(enhanced_sections)
+    total_corrections = sum(s.get('corrections_made', 0) for s in enhanced_sections)
+
+    # Calculate average scores
+    before_scores = [s.get('text_quality_before', {}).get('score', 0) for s in enhanced_sections if s.get('text_quality_before')]
+    after_scores = [s.get('text_quality_after', {}).get('score', 0) for s in enhanced_sections if s.get('text_quality_after')]
+
+    if before_scores and after_scores:
+        avg_before = sum(before_scores) / len(before_scores)
+        avg_after = sum(after_scores) / len(after_scores)
+        improvement = avg_after - avg_before
+
+        # Get grade for average scores
+        def get_grade(score):
+            if score >= 90: return 'A'
+            elif score >= 80: return 'B'
+            elif score >= 70: return 'C'
+            elif score >= 60: return 'D'
+            else: return 'F'
+
+        return {
+            'enabled': True,
+            'sections_enhanced': total_sections,
+            'total_corrections': total_corrections,
+            'average_before': round(avg_before, 1),
+            'average_after': round(avg_after, 1),
+            'improvement': round(improvement, 1),
+            'grade_before': get_grade(avg_before),
+            'grade_after': get_grade(avg_after),
+            'aggressive_mode': enhanced_sections[0].get('cleanup_aggressive', False)
+        }
+
+    return {
+        'enabled': True,
+        'sections_enhanced': total_sections,
+        'total_corrections': total_corrections,
+        'message': 'Quality metrics calculated but scores unavailable'
+    }
+
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'pdf'}
 
@@ -118,6 +171,7 @@ def analyze_pdf():
         data = request.get_json()
         filepath = data.get('filepath')
         ai_provider = data.get('ai_provider', 'mock')
+        content_type = data.get('content_type', 'source_material')
         run_confidence_test = data.get('run_confidence_test', True)
 
         if not filepath or not os.path.exists(filepath):
@@ -161,6 +215,9 @@ def analyze_pdf():
 
         # Perform AI analysis
         game_metadata = detector.analyze_game_metadata(Path(filepath))
+        
+        # Add content type to game metadata
+        game_metadata['content_type'] = content_type
 
         # Add confidence information to game metadata
         if confidence_results:
@@ -175,6 +232,7 @@ def analyze_pdf():
             'filename': os.path.basename(filepath),
             'game_metadata': game_metadata,
             'ai_provider': ai_provider,
+            'content_type': content_type,
             'analysis_time': datetime.now().isoformat(),
             'extracted_text': extracted_content.get('combined_text', ''),  # Store extracted text for copy functionality
             'confidence_results': confidence_results
@@ -227,27 +285,40 @@ def extract_pdf():
         filepath = analysis['filepath']
         game_metadata = analysis['game_metadata']
 
+        # Get text quality settings from request
+        enable_text_enhancement = data.get('enable_text_enhancement', True)
+        aggressive_cleanup = data.get('aggressive_cleanup', False)
+
         # Initialize PDF processor
         ai_config = {
             'provider': analysis['ai_provider'],
-            'debug': True
+            'debug': True,
+            'enable_text_enhancement': enable_text_enhancement,
+            'aggressive_cleanup': aggressive_cleanup
         }
 
         processor = MultiGamePDFProcessor(debug=True, ai_config=ai_config)
 
+        # Get content type
+        content_type = analysis.get('content_type') or game_metadata.get('content_type', 'source_material')
+
         # Extract content
-        logger.info(f"Extracting content from: {filepath}")
-        extraction_result = processor.extract_pdf(Path(filepath))
+        logger.info(f"Extracting content from: {filepath} (Content Type: {content_type})")
+        extraction_result = processor.extract_pdf(Path(filepath), content_type=content_type)
 
         # Get sections and summary from result
         sections = extraction_result['sections']
         summary = extraction_result['extraction_summary']
+
+        # Calculate text quality metrics from sections
+        text_quality_metrics = calculate_text_quality_metrics(sections)
 
         # Store extraction results
         extraction_results[session_id] = {
             'sections': sections,
             'summary': summary,
             'game_metadata': game_metadata,
+            'text_quality_metrics': text_quality_metrics,
             'extraction_time': datetime.now().isoformat()
         }
 
@@ -255,6 +326,7 @@ def extract_pdf():
             'success': True,
             'summary': summary,
             'sections_count': len(sections),
+            'text_quality_metrics': text_quality_metrics,
             'ready_for_import': True
         })
 
@@ -284,13 +356,14 @@ def import_to_chroma():
         # Initialize collection manager
         manager = MultiGameCollectionManager()
 
-        # Create hierarchical collection path: {game_type}.{edition}.{book_type}.{collection_name}
+        # Create hierarchical collection path: {content_type}.{game_type}.{edition}.{book_type}.{collection_name}
+        content_type = game_metadata.get('content_type', 'source_material')
         game_type = game_metadata.get('game_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
         edition = game_metadata.get('edition', 'unknown').lower().replace(' ', '_').replace('&', 'and')
         book_type = game_metadata.get('book_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
         collection_base = game_metadata.get('collection_name', 'unknown')
 
-        collection_name = f"{game_type}.{edition}.{book_type}.{collection_base}"
+        collection_name = f"{content_type}.{game_type}.{edition}.{book_type}.{collection_base}"
         logger.info(f"Importing to ChromaDB collection: {collection_name}")
 
         # Convert sections to ChromaDB format
@@ -305,6 +378,7 @@ def import_to_chroma():
                 'title': section['title'],
                 'page': section['page'],
                 'category': section['category'],
+                'content_type': game_metadata.get('content_type', 'source_material'),
                 'game_type': game_metadata['game_type'],
                 'edition': game_metadata['edition'],
                 'book': game_metadata.get('book_type', 'Unknown'),
@@ -363,19 +437,22 @@ def import_to_mongodb():
 
         if use_hierarchical_collections:
             # Create hierarchical collection path: rpger.source_material.{game_type}.{edition}.{book_type}.{collection_name}
+            content_type = game_metadata.get('content_type', 'source_material')
             game_type = game_metadata.get('game_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
             edition = game_metadata.get('edition', 'unknown').lower().replace(' ', '_').replace('&', 'and')
             book_type = game_metadata.get('book_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
             collection_base = game_metadata.get('collection_name', 'unknown')
 
-            collection_name = f"source_material.{game_type}.{edition}.{book_type}.{collection_base}"
+            collection_name = f"{content_type}.{game_type}.{edition}.{book_type}.{collection_base}"
         else:
             # Option 2: Single collection with hierarchical documents
             # All content goes in one collection with folder-like metadata
-            collection_name = "source_material"
+            content_type = game_metadata.get('content_type', 'source_material')
+            collection_name = content_type
 
             # Add hierarchical metadata to each document
             hierarchical_path = {
+                "content_type": content_type,
                 "game_type": game_metadata.get('game_type', 'unknown'),
                 "edition": game_metadata.get('edition', 'unknown'),
                 "book_type": game_metadata.get('book_type', 'unknown'),

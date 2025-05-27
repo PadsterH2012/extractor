@@ -27,6 +27,14 @@ Extraction v3 extends the proven v2 system with **multi-game architecture** supp
 - **🎯 Tested & Verified**: Successfully processes 125 pages, 133k+ words in ~60 seconds
 - **🔧 Manual Override**: Force specific game type and edition when needed
 
+### ✨ Text Quality Enhancement 🚀 NEW FEATURE
+- **🔤 Spell Checking**: Advanced spell checker with RPG-specific dictionary (THAC0, armor class, etc.)
+- **🧹 OCR Cleanup**: Removes common OCR artifacts (rn→m, l→I, smart quotes, spacing issues)
+- **📊 Quality Scoring**: Before/after metrics with A-F grades (e.g., 72% → 85% quality improvement)
+- **⚙️ User Control**: Normal vs aggressive cleanup modes with real-time quality feedback
+- **🎲 RPG Preservation**: Maintains D&D terminology while fixing spelling errors
+- **📈 Detailed Metrics**: Corrections count, character changes, readability improvements
+
 ### 📊 Hierarchical Organization
 ```
 Game Type → Edition → Book → Content
@@ -167,6 +175,7 @@ python3 Extraction.py extract "tsr2010-players-handbook.pdf" --ai-provider claud
 # 📖 Edition: 1st
 # 📚 Book: PHB
 # 🏷️ Collection: dnd_1st_phb
+# ✨ Text quality: 72% → 85% (C → B) - 47 corrections made
 # ✅ Extraction complete! (125 pages, 133,082 words in ~60 seconds)
 ```
 

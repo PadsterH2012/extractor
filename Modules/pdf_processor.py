@@ -16,6 +16,7 @@ import pdfplumber
 
 from .ai_game_detector import AIGameDetector
 from .ai_categorizer import AICategorizer
+from .text_quality_enhancer import TextQualityEnhancer
 
 class MultiGamePDFProcessor:
     """Enhanced PDF processor with AI-powered multi-game support"""
@@ -30,7 +31,16 @@ class MultiGamePDFProcessor:
         self.game_detector = AIGameDetector(ai_config=self.ai_config, debug=debug)
         self.categorizer = AICategorizer(ai_config=self.ai_config, debug=debug)
 
+        # Initialize text quality enhancer
+        self.text_enhancer = TextQualityEnhancer(self.ai_config)
+
+        # Text quality settings
+        self.enable_text_enhancement = self.ai_config.get('enable_text_enhancement', True)
+        self.aggressive_cleanup = self.ai_config.get('aggressive_cleanup', False)
+
         self.logger.info(f"AI-Powered Multi-Game PDF Processor initialized (Provider: {self.ai_config['provider']})")
+        if self.enable_text_enhancement:
+            self.logger.info("✨ Text quality enhancement enabled")
 
     def setup_logging(self):
         """Setup logging configuration"""
@@ -143,6 +153,19 @@ class MultiGamePDFProcessor:
                 if is_multi_column:
                     text = self._process_multi_column_text(blocks, page.rect.width)
 
+                # Apply text quality enhancement if enabled
+                original_text = text
+                text_quality_result = None
+                if self.enable_text_enhancement and text.strip():
+                    text_quality_result = self.text_enhancer.enhance_text_quality(
+                        text, aggressive=self.aggressive_cleanup
+                    )
+                    text = text_quality_result.cleaned_text
+
+                    if self.debug and text_quality_result:
+                        quality_summary = self.text_enhancer.get_quality_summary(text_quality_result)
+                        self.logger.debug(f"Page {page_num + 1} quality: {quality_summary['before']['score']}% → {quality_summary['after']['score']}% ({quality_summary['before']['grade']} → {quality_summary['after']['grade']})")
+
                 # Extract tables
                 tables = self._extract_tables_from_page(doc.name, page_num)
                 total_tables += len(tables)
@@ -170,6 +193,20 @@ class MultiGamePDFProcessor:
                     "edition": game_metadata["edition"],
                     "book": game_metadata.get("book_type", "Unknown")
                 }
+
+                # Add text quality metadata if enhancement was applied
+                if text_quality_result:
+                    quality_summary = self.text_enhancer.get_quality_summary(text_quality_result)
+                    section.update({
+                        "text_quality_enhanced": True,
+                        "text_quality_before": quality_summary["before"],
+                        "text_quality_after": quality_summary["after"],
+                        "text_quality_improvement": quality_summary["improvement"],
+                        "corrections_made": len(text_quality_result.corrections_made),
+                        "cleanup_aggressive": self.aggressive_cleanup
+                    })
+                else:
+                    section["text_quality_enhanced"] = False
 
                 sections.append(section)
 

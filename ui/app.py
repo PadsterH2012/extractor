@@ -39,6 +39,59 @@ logger = logging.getLogger(__name__)
 analysis_results = {}
 extraction_results = {}
 
+def calculate_text_quality_metrics(sections):
+    """Calculate aggregated text quality metrics from sections"""
+    if not sections:
+        return None
+
+    enhanced_sections = [s for s in sections if s.get('text_quality_enhanced', False)]
+
+    if not enhanced_sections:
+        return {
+            'enabled': False,
+            'message': 'Text quality enhancement was not enabled'
+        }
+
+    # Aggregate metrics
+    total_sections = len(enhanced_sections)
+    total_corrections = sum(s.get('corrections_made', 0) for s in enhanced_sections)
+
+    # Calculate average scores
+    before_scores = [s.get('text_quality_before', {}).get('score', 0) for s in enhanced_sections if s.get('text_quality_before')]
+    after_scores = [s.get('text_quality_after', {}).get('score', 0) for s in enhanced_sections if s.get('text_quality_after')]
+
+    if before_scores and after_scores:
+        avg_before = sum(before_scores) / len(before_scores)
+        avg_after = sum(after_scores) / len(after_scores)
+        improvement = avg_after - avg_before
+
+        # Get grade for average scores
+        def get_grade(score):
+            if score >= 90: return 'A'
+            elif score >= 80: return 'B'
+            elif score >= 70: return 'C'
+            elif score >= 60: return 'D'
+            else: return 'F'
+
+        return {
+            'enabled': True,
+            'sections_enhanced': total_sections,
+            'total_corrections': total_corrections,
+            'average_before': round(avg_before, 1),
+            'average_after': round(avg_after, 1),
+            'improvement': round(improvement, 1),
+            'grade_before': get_grade(avg_before),
+            'grade_after': get_grade(avg_after),
+            'aggressive_mode': enhanced_sections[0].get('cleanup_aggressive', False)
+        }
+
+    return {
+        'enabled': True,
+        'sections_enhanced': total_sections,
+        'total_corrections': total_corrections,
+        'message': 'Quality metrics calculated but scores unavailable'
+    }
+
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'pdf'}
 
@@ -232,10 +285,16 @@ def extract_pdf():
         filepath = analysis['filepath']
         game_metadata = analysis['game_metadata']
 
+        # Get text quality settings from request
+        enable_text_enhancement = data.get('enable_text_enhancement', True)
+        aggressive_cleanup = data.get('aggressive_cleanup', False)
+
         # Initialize PDF processor
         ai_config = {
             'provider': analysis['ai_provider'],
-            'debug': True
+            'debug': True,
+            'enable_text_enhancement': enable_text_enhancement,
+            'aggressive_cleanup': aggressive_cleanup
         }
 
         processor = MultiGamePDFProcessor(debug=True, ai_config=ai_config)
@@ -251,11 +310,15 @@ def extract_pdf():
         sections = extraction_result['sections']
         summary = extraction_result['extraction_summary']
 
+        # Calculate text quality metrics from sections
+        text_quality_metrics = calculate_text_quality_metrics(sections)
+
         # Store extraction results
         extraction_results[session_id] = {
             'sections': sections,
             'summary': summary,
             'game_metadata': game_metadata,
+            'text_quality_metrics': text_quality_metrics,
             'extraction_time': datetime.now().isoformat()
         }
 
@@ -263,6 +326,7 @@ def extract_pdf():
             'success': True,
             'summary': summary,
             'sections_count': len(sections),
+            'text_quality_metrics': text_quality_metrics,
             'ready_for_import': True
         })
 

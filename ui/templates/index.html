@@ -116,6 +116,32 @@
                     </div>
                     <div class="card-body">
                         <p class="text-muted">Extract and categorize content from the analyzed PDF.</p>
+
+                        <!-- Text Quality Enhancement Settings -->
+                        <div class="alert alert-light border mb-3">
+                            <h6><i class="fas fa-magic"></i> Text Quality Enhancement</h6>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="enableTextEnhancement" checked>
+                                        <label class="form-check-label" for="enableTextEnhancement">
+                                            <strong>Enable Text Enhancement</strong>
+                                        </label>
+                                        <div class="small text-muted">Spell checking, OCR cleanup, and quality scoring</div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="aggressiveCleanup">
+                                        <label class="form-check-label" for="aggressiveCleanup">
+                                            <strong>Aggressive Cleanup</strong>
+                                        </label>
+                                        <div class="small text-muted">More corrections, may change meaning</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <button class="btn btn-warning" id="extract-btn" onclick="extractContent()">
                             <i class="fas fa-play"></i> Extract Content
                         </button>

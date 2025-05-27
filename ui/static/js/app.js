@@ -342,13 +342,19 @@ function extractContent() {
     document.getElementById('extraction-progress').style.display = 'block';
     updateProgress('extract', 'active');
 
+    // Get text quality settings
+    const enableTextEnhancement = document.getElementById('enableTextEnhancement')?.checked ?? true;
+    const aggressiveCleanup = document.getElementById('aggressiveCleanup')?.checked ?? false;
+
     fetch('/extract', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-            session_id: currentSessionId
+            session_id: currentSessionId,
+            enable_text_enhancement: enableTextEnhancement,
+            aggressive_cleanup: aggressiveCleanup
         })
     })
     .then(response => response.json())
@@ -376,14 +382,57 @@ function extractContent() {
 // Display extraction results
 function displayExtractionResults(data) {
     const summary = data.summary;
-    const resultsHtml = `
+    const textQuality = data.text_quality_metrics;
+
+    let resultsHtml = `
         <div class="extraction-summary">
             <div class="summary-stat">Pages: ${summary.total_pages || 0}</div>
             <div class="summary-stat">Words: ${(summary.total_words || 0).toLocaleString()}</div>
             <div class="summary-stat">Sections: ${data.sections_count || 0}</div>
         </div>
-        ${summary.category_distribution ? generateCategoryDistribution(summary.category_distribution) : ''}
     `;
+
+    // Add text quality metrics if available
+    if (textQuality && textQuality.enabled) {
+        const qualityBadgeClass = getQualityBadgeClass(textQuality.grade_after || 'F');
+        resultsHtml += `
+            <div class="text-quality-summary mt-3">
+                <h6><i class="fas fa-magic"></i> Text Quality Enhancement</h6>
+                <div class="quality-metrics">
+                    <div class="quality-stat">
+                        <span class="quality-label">Quality:</span>
+                        <span class="quality-value">
+                            ${textQuality.average_before || 0}% → ${textQuality.average_after || 0}%
+                            <span class="badge ${qualityBadgeClass} ms-1">${textQuality.grade_before || 'F'} → ${textQuality.grade_after || 'F'}</span>
+                        </span>
+                    </div>
+                    <div class="quality-stat">
+                        <span class="quality-label">Improvement:</span>
+                        <span class="quality-value">+${textQuality.improvement || 0}%</span>
+                    </div>
+                    <div class="quality-stat">
+                        <span class="quality-label">Corrections:</span>
+                        <span class="quality-value">${textQuality.total_corrections || 0}</span>
+                    </div>
+                    ${textQuality.aggressive_mode ? '<div class="quality-stat"><span class="badge bg-warning">Aggressive Mode</span></div>' : ''}
+                </div>
+            </div>
+        `;
+    } else if (textQuality && !textQuality.enabled) {
+        resultsHtml += `
+            <div class="text-quality-summary mt-3">
+                <h6><i class="fas fa-info-circle"></i> Text Quality Enhancement</h6>
+                <div class="alert alert-info small mb-0">
+                    ${textQuality.message || 'Text enhancement was not enabled for this extraction.'}
+                </div>
+            </div>
+        `;
+    }
+
+    // Add category distribution
+    if (summary.category_distribution) {
+        resultsHtml += generateCategoryDistribution(summary.category_distribution);
+    }
 
     document.getElementById('extraction-details').innerHTML = resultsHtml;
     document.getElementById('extraction-results').style.display = 'block';
@@ -469,6 +518,18 @@ function getConfidenceBadgeClass(confidence) {
     if (confidence >= 70) return 'bg-warning';
     if (confidence >= 60) return 'bg-danger';
     return 'bg-dark';
+}
+
+// Get quality badge CSS class
+function getQualityBadgeClass(grade) {
+    switch(grade) {
+        case 'A': return 'bg-success';
+        case 'B': return 'bg-primary';
+        case 'C': return 'bg-warning';
+        case 'D': return 'bg-danger';
+        case 'F': return 'bg-dark';
+        default: return 'bg-secondary';
+    }
 }
 
 // Update path preview
@@ -911,33 +972,41 @@ function browseMongoDB() {
 function displayDatabaseBrowser(dbType, collections, dbKey) {
     const modalHtml = `
         <div class="modal fade" id="databaseBrowserModal" tabindex="-1">
-            <div class="modal-dialog modal-lg">
+            <div class="modal-dialog modal-xl">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title">${dbType} Collections Browser</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
-                    <div class="modal-body">
-                        <div class="row">
+                    <div class="modal-body p-0">
+                        <div class="row g-0" style="min-height: 600px;">
                             <div class="col-md-4">
-                                <h6>Collections (${collections.length})</h6>
-                                <div class="list-group" id="collections-list">
-                                    ${collections.map(col => `
-                                        <a href="#" class="list-group-item list-group-item-action"
-                                           onclick="browseCollection('${dbKey}', '${col.name}')">
-                                            <div class="d-flex w-100 justify-content-between">
-                                                <h6 class="mb-1">${col.name}</h6>
-                                                <small>${col.document_count} docs</small>
-                                            </div>
-                                            ${col.game_type ? `<small class="text-muted">Game: ${col.game_type}</small>` : ''}
-                                            ${col.sample_fields ? `<small class="text-muted">Fields: ${col.sample_fields.slice(0,3).join(', ')}</small>` : ''}
-                                        </a>
-                                    `).join('')}
+                                <div class="collections-sidebar">
+                                    <div class="collections-header">
+                                        <h6 class="mb-0">Collections</h6>
+                                        <span class="collections-count">${collections.length}</span>
+                                    </div>
+
+                                    <div class="collection-search">
+                                        <input type="text" class="form-control" placeholder="Search collections..."
+                                               id="collection-search-input" onkeyup="filterCollections()">
+                                        <i class="fas fa-search search-icon"></i>
+                                    </div>
+
+                                    <div id="collections-list" style="max-height: 450px; overflow-y: auto;">
+                                        ${generateCollectionItems(collections, dbKey)}
+                                    </div>
                                 </div>
                             </div>
                             <div class="col-md-8">
-                                <div id="collection-details">
-                                    <p class="text-muted">Select a collection to view documents</p>
+                                <div class="documents-panel">
+                                    <div id="collection-details">
+                                        <div class="documents-empty">
+                                            <i class="fas fa-database"></i>
+                                            <h6>Select a Collection</h6>
+                                            <p class="mb-0">Choose a collection from the sidebar to view its documents</p>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -956,9 +1025,149 @@ function displayDatabaseBrowser(dbType, collections, dbKey) {
     // Add modal to page
     document.body.insertAdjacentHTML('beforeend', modalHtml);
 
+    // Store collections data for filtering
+    window.currentCollections = collections;
+    window.currentDbKey = dbKey;
+
     // Show modal
     const modal = new bootstrap.Modal(document.getElementById('databaseBrowserModal'));
     modal.show();
+}
+
+// Generate collection items HTML
+function generateCollectionItems(collections, dbKey) {
+    return collections.map(col => {
+        const collectionType = getCollectionType(col.name);
+        const icon = getCollectionIcon(collectionType);
+        const hierarchicalPath = getHierarchicalPath(col.name);
+
+        return `
+            <div class="collection-item" data-name="${col.name.toLowerCase()}"
+                 onclick="selectCollection(this, '${dbKey}', '${col.name}')">
+                <div class="p-3">
+                    <div class="collection-header">
+                        <div class="collection-name">
+                            <div class="collection-icon ${collectionType}">
+                                <i class="fas ${icon}"></i>
+                            </div>
+                            ${formatCollectionName(col.name)}
+                        </div>
+                        <span class="collection-count">${col.document_count || 0}</span>
+                    </div>
+
+                    <div class="collection-meta">
+                        ${col.game_type ? `<div><strong>Game:</strong> ${col.game_type}</div>` : ''}
+                        ${col.sample_fields ? `<div><strong>Fields:</strong> ${col.sample_fields.slice(0,3).join(', ')}</div>` : ''}
+                        <div class="collection-path">${hierarchicalPath}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+// Get collection type from name
+function getCollectionType(name) {
+    const lowerName = name.toLowerCase();
+    if (lowerName.includes('monster')) return 'monsters';
+    if (lowerName.includes('spell')) return 'spells';
+    if (lowerName.includes('item')) return 'items';
+    if (lowerName.includes('character')) return 'characters';
+    if (lowerName.includes('npc')) return 'npcs';
+    if (lowerName.includes('source_material')) return 'source_material';
+    return 'default';
+}
+
+// Get icon for collection type
+function getCollectionIcon(type) {
+    const icons = {
+        monsters: 'fa-dragon',
+        spells: 'fa-magic',
+        items: 'fa-gem',
+        characters: 'fa-user',
+        npcs: 'fa-users',
+        source_material: 'fa-book',
+        default: 'fa-database'
+    };
+    return icons[type] || icons.default;
+}
+
+// Format collection name for display
+function formatCollectionName(name) {
+    // Remove prefixes and make more readable
+    return name.replace(/^source_material\./, '')
+               .replace(/\./g, ' › ')
+               .replace(/_/g, ' ')
+               .split(' ')
+               .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+               .join(' ');
+}
+
+// Get hierarchical path
+function getHierarchicalPath(name) {
+    if (name.startsWith('source_material.')) {
+        return `rpger.${name}`;
+    }
+    return `rpger.${name}`;
+}
+
+// Filter collections based on search
+function filterCollections() {
+    const searchTerm = document.getElementById('collection-search-input').value.toLowerCase();
+    const collectionItems = document.querySelectorAll('.collection-item');
+
+    collectionItems.forEach(item => {
+        const name = item.dataset.name;
+        const isVisible = name.includes(searchTerm);
+        item.style.display = isVisible ? 'block' : 'none';
+    });
+}
+
+// Select collection
+function selectCollection(element, dbKey, collectionName) {
+    // Remove active class from all items
+    document.querySelectorAll('.collection-item').forEach(item => {
+        item.classList.remove('active');
+    });
+
+    // Add active class to selected item
+    element.classList.add('active');
+
+    // Show loading state
+    showCollectionLoading(collectionName);
+
+    // Browse collection
+    browseCollection(dbKey, collectionName);
+}
+
+// Show loading state for collection
+function showCollectionLoading(collectionName) {
+    const detailsDiv = document.getElementById('collection-details');
+    detailsDiv.innerHTML = `
+        <div class="documents-header">
+            <h6 class="documents-title">
+                <i class="fas fa-spinner fa-spin"></i>
+                Loading ${formatCollectionName(collectionName)}
+            </h6>
+        </div>
+        <div class="loading-content">
+            ${Array(5).fill(0).map(() => `
+                <div class="document-card">
+                    <div class="document-card-body">
+                        <div class="loading-skeleton" style="width: 60%; height: 16px;"></div>
+                        <div class="loading-skeleton" style="width: 100%; height: 12px;"></div>
+                        <div class="loading-skeleton" style="width: 100%; height: 12px;"></div>
+                        <div class="loading-skeleton" style="width: 80%; height: 12px;"></div>
+                        <div style="display: flex; gap: 8px; margin-top: 8px;">
+                            <div class="loading-skeleton" style="width: 60px; height: 20px;"></div>
+                            <div class="loading-skeleton" style="width: 80px; height: 20px;"></div>
+                            <div class="loading-skeleton" style="width: 50px; height: 20px;"></div>
+                        </div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
 }
 
 // Browse specific collection
@@ -987,24 +1196,77 @@ function displayCollectionDocuments(data, dbType) {
     const detailsDiv = document.getElementById('collection-details');
 
     const documentsHtml = `
-        <h6>${data.collection} Documents</h6>
-        <p class="text-muted">Showing ${data.total_shown} of ${data.total_count || data.documents.length} documents</p>
-        <div class="documents-list" style="max-height: 400px; overflow-y: auto;">
-            ${data.documents.map((doc, index) => `
-                <div class="card mb-2">
-                    <div class="card-body p-2">
-                        <h6 class="card-title">${doc.id || doc._id || `Document ${index + 1}`}</h6>
-                        <p class="card-text small">${doc.content || 'No content available'}</p>
-                        ${doc.game_metadata ? `<small class="text-muted"><strong>Game:</strong> ${doc.game_metadata.game_type || 'Unknown'} ${doc.game_metadata.edition || ''} ${doc.game_metadata.book_type || ''}</small><br>` : ''}
-                        ${doc.source_file ? `<small class="text-muted"><strong>Source:</strong> ${doc.source_file}</small><br>` : ''}
-                        ${doc.sections && Array.isArray(doc.sections) ? `<small class="text-muted"><strong>Sections:</strong> ${doc.sections.length}</small><br>` : ''}
-                        ${doc.metadata ? `<small class="text-muted"><strong>Metadata:</strong> ${JSON.stringify(doc.metadata).substring(0, 100)}...</small><br>` : ''}
-                        ${doc.word_count ? `<small class="text-muted"><strong>Words:</strong> ${doc.word_count}</small>` : ''}
-                        ${doc.page ? `<small class="text-muted"> | <strong>Page:</strong> ${doc.page}</small>` : ''}
-                        ${doc.import_date ? `<br><small class="text-muted"><strong>Imported:</strong> ${new Date(doc.import_date).toLocaleDateString()}</small>` : ''}
+        <div class="documents-header">
+            <h6 class="documents-title">
+                <i class="fas fa-file-alt"></i>
+                ${formatCollectionName(data.collection)}
+            </h6>
+            <div class="documents-stats">
+                Showing ${data.total_shown} of ${data.total_count || data.documents.length} documents
+            </div>
+        </div>
+
+        <div class="documents-list" style="max-height: 450px; overflow-y: auto;">
+            ${data.documents.length > 0 ? data.documents.map((doc, index) => `
+                <div class="document-card">
+                    <div class="document-card-body">
+                        <div class="document-title">
+                            <i class="fas fa-file-text"></i>
+                            ${doc.id || doc._id || `Document ${index + 1}`}
+                        </div>
+
+                        <div class="document-content">
+                            ${doc.content || 'No content available'}
+                        </div>
+
+                        <div class="document-meta">
+                            ${doc.game_metadata ? `
+                                <span class="meta-tag game">
+                                    ${doc.game_metadata.game_type || 'Unknown'}
+                                    ${doc.game_metadata.edition || ''}
+                                    ${doc.game_metadata.book_type || ''}
+                                </span>
+                            ` : ''}
+
+                            ${doc.source_file ? `
+                                <span class="meta-tag source">
+                                    <i class="fas fa-file"></i> ${doc.source_file}
+                                </span>
+                            ` : ''}
+
+                            ${doc.page ? `
+                                <span class="meta-tag page">
+                                    <i class="fas fa-bookmark"></i> Page ${doc.page}
+                                </span>
+                            ` : ''}
+
+                            ${doc.word_count ? `
+                                <span class="meta-tag words">
+                                    <i class="fas fa-font"></i> ${doc.word_count} words
+                                </span>
+                            ` : ''}
+
+                            ${doc.sections && Array.isArray(doc.sections) ? `
+                                <span class="meta-tag">
+                                    <i class="fas fa-list"></i> ${doc.sections.length} sections
+                                </span>
+                            ` : ''}
+
+                            ${doc.import_date ? `
+                                <span class="meta-tag">
+                                    <i class="fas fa-calendar"></i> ${new Date(doc.import_date).toLocaleDateString()}
+                                </span>
+                            ` : ''}
+                        </div>
                     </div>
                 </div>
-            `).join('')}
+            `).join('') : `
+                <div class="documents-empty">
+                    <i class="fas fa-inbox"></i>
+                    <h6>No Documents Found</h6>
+                    <p class="mb-0">This collection appears to be empty</p>
+                </div>
+            `}
         </div>
     `;
 

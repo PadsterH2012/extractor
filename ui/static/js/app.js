@@ -468,7 +468,7 @@ function showImportCard() {
 
 // Populate metadata review section
 function populateMetadataReview(analysis, confidence) {
-    document.getElementById('display-content-type').textContent = 
+    document.getElementById('display-content-type').textContent =
         analysis.content_type ? (analysis.content_type === 'novel' ? 'Novel' : 'Source Material') : 'Source Material';
     document.getElementById('display-game-type').textContent = analysis.game_type || 'Unknown';
     document.getElementById('display-edition').textContent = analysis.edition || 'Unknown';
@@ -476,6 +476,11 @@ function populateMetadataReview(analysis, confidence) {
     document.getElementById('display-book-title').textContent = analysis.book_full_name || analysis.book_title || 'Unknown';
     document.getElementById('display-collection').textContent = analysis.collection_name || 'Unknown';
     document.getElementById('display-isbn').textContent = analysis.isbn || analysis.isbn_13 || analysis.isbn_10 || 'Not found';
+
+    // Set the dropdown to match the content type
+    if (document.getElementById('edit-content-type')) {
+        document.getElementById('edit-content-type').value = analysis.content_type || 'source_material';
+    }
 
     // Set the dropdown to match the content type
     if (document.getElementById('edit-content-type')) {
@@ -542,10 +547,10 @@ function getQualityBadgeClass(grade) {
 
 // Update path preview
 function updatePathPreview() {
-    const contentType = (document.getElementById('edit-content-type') ? 
-                         document.getElementById('edit-content-type').value : 
+    const contentType = (document.getElementById('edit-content-type') ?
+                         document.getElementById('edit-content-type').value :
                          (currentAnalysisData?.content_type || 'source_material'));
-    
+
     const gameType = (document.getElementById('edit-game-type').value ||
                      document.getElementById('display-game-type').textContent || 'unknown')
                      .toLowerCase().replace(/\s+/g, '_').replace(/&/g, 'and');
@@ -610,7 +615,7 @@ function toggleMetadataEdit() {
 // Save metadata changes
 function saveMetadataChanges() {
     // Update display values
-    document.getElementById('display-content-type').textContent = 
+    document.getElementById('display-content-type').textContent =
         document.getElementById('edit-content-type').value === 'novel' ? 'Novel' : 'Source Material';
     document.getElementById('display-game-type').textContent = document.getElementById('edit-game-type').value;
     document.getElementById('display-edition').textContent = document.getElementById('edit-edition').value;
@@ -1251,7 +1256,6 @@ function displayCollectionDocuments(data, dbType) {
                                     <i class="fas fa-barcode"></i> ISBN: ${doc.isbn || doc.isbn_13 || doc.isbn_10}
                                 </span>
                             ` : ''}
-
                             ${doc.page ? `
                                 <span class="meta-tag page">
                                     <i class="fas fa-bookmark"></i> Page ${doc.page}

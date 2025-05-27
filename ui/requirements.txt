@@ -1,0 +1,17 @@
+# AI-Powered Extraction v3 Web UI Requirements
+
+# Web Framework
+Flask==2.3.3
+Werkzeug==2.3.7
+
+# File Upload Security
+secure-filename==0.1
+
+# Existing extraction dependencies (inherited from parent)
+# These should already be installed in the main Extractionv3 environment:
+# PyMuPDF==1.23.8
+# chromadb>=0.6.3
+# anthropic>=0.7.0
+# openai>=1.0.0
+# requests>=2.31.0
+# python-dotenv>=1.0.0

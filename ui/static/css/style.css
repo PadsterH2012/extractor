@@ -1,0 +1,348 @@
+/* AI-Powered Extraction v3 UI Styles */
+
+body {
+    background-color: #f8f9fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+/* Upload Area Styles */
+.upload-area {
+    border: 2px dashed #dee2e6;
+    border-radius: 10px;
+    padding: 40px;
+    text-align: center;
+    transition: all 0.3s ease;
+    cursor: pointer;
+    position: relative;
+}
+
+.upload-area:hover {
+    border-color: #0d6efd;
+    background-color: #f8f9ff;
+}
+
+.upload-area.dragover {
+    border-color: #0d6efd;
+    background-color: #e7f3ff;
+    transform: scale(1.02);
+}
+
+.upload-area.uploading {
+    border-color: #0d6efd;
+    background-color: #e7f3ff;
+    cursor: wait;
+    pointer-events: none;
+}
+
+.upload-area.uploading::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(13, 110, 253, 0.1);
+    border-radius: 8px;
+    animation: pulse-upload 1.5s infinite;
+}
+
+@keyframes pulse-upload {
+    0% { opacity: 0.1; }
+    50% { opacity: 0.3; }
+    100% { opacity: 0.1; }
+}
+
+/* Progress Steps */
+.progress-step {
+    padding: 8px 0;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.progress-step.completed i {
+    color: #198754 !important;
+}
+
+.progress-step.active i {
+    color: #0d6efd !important;
+    animation: pulse 1.5s infinite;
+}
+
+.progress-step.error i {
+    color: #dc3545 !important;
+    animation: pulse-error 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+@keyframes pulse-error {
+    0% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.1); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+/* Card Animations */
+.card {
+    transition: all 0.3s ease;
+    border: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.card:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    transform: translateY(-2px);
+}
+
+/* Button Styles */
+.btn {
+    border-radius: 6px;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Analysis Results */
+.analysis-detail {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #e9ecef;
+}
+
+.analysis-detail:last-child {
+    border-bottom: none;
+}
+
+.analysis-label {
+    font-weight: 600;
+    color: #495057;
+}
+
+.analysis-value {
+    color: #0d6efd;
+    font-weight: 500;
+}
+
+/* Confidence Badge */
+.confidence-badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.confidence-high {
+    background-color: #d1e7dd;
+    color: #0f5132;
+}
+
+.confidence-medium {
+    background-color: #fff3cd;
+    color: #664d03;
+}
+
+.confidence-low {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+/* Status Indicators */
+.status-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.status-connected {
+    background-color: #198754;
+    animation: pulse-green 2s infinite;
+}
+
+.status-error {
+    background-color: #dc3545;
+}
+
+.status-warning {
+    background-color: #ffc107;
+}
+
+@keyframes pulse-green {
+    0% { opacity: 1; }
+    50% { opacity: 0.6; }
+    100% { opacity: 1; }
+}
+
+/* Loading Animations */
+.loading-spinner {
+    display: inline-block;
+    width: 20px;
+    height: 20px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #0d6efd;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 10px;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Toast Customization */
+.toast {
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.toast-success {
+    border-left: 4px solid #198754;
+}
+
+.toast-error {
+    border-left: 4px solid #dc3545;
+}
+
+.toast-warning {
+    border-left: 4px solid #ffc107;
+}
+
+.toast-info {
+    border-left: 4px solid #0dcaf0;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .container-fluid {
+        padding: 10px;
+    }
+
+    .card {
+        margin-bottom: 15px;
+    }
+
+    .upload-area {
+        padding: 20px;
+    }
+
+    .btn {
+        width: 100%;
+        margin-bottom: 10px;
+    }
+}
+
+/* File Info Styles */
+.file-info-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 5px 0;
+}
+
+/* Import Results */
+.import-success {
+    background-color: #d1e7dd;
+    border: 1px solid #badbcc;
+    color: #0f5132;
+    padding: 12px;
+    border-radius: 6px;
+    margin-top: 10px;
+}
+
+.import-error {
+    background-color: #f8d7da;
+    border: 1px solid #f5c2c7;
+    color: #721c24;
+    padding: 12px;
+    border-radius: 6px;
+    margin-top: 10px;
+}
+
+/* Extraction Summary */
+.extraction-summary {
+    background-color: #fff3cd;
+    border: 1px solid #ffecb5;
+    color: #664d03;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 15px;
+}
+
+.summary-stat {
+    display: inline-block;
+    margin-right: 20px;
+    font-weight: 600;
+}
+
+/* AI Provider Status */
+.provider-status {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    font-size: 14px;
+}
+
+.provider-available {
+    color: #198754;
+    font-weight: 500;
+}
+
+.provider-unavailable {
+    color: #dc3545;
+    font-weight: 500;
+}
+
+/* Category Distribution */
+.category-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+    font-size: 13px;
+}
+
+.category-count {
+    background-color: #e9ecef;
+    color: #495057;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-weight: 600;
+}
+
+/* Copy Button Styles */
+#copy-text-btn {
+    transition: all 0.3s ease;
+    border: 1px solid #6c757d;
+}
+
+#copy-text-btn:hover {
+    background-color: #6c757d;
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+#copy-text-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+#copy-text-btn:disabled:hover {
+    background-color: transparent;
+    color: #6c757d;
+}

@@ -308,6 +308,12 @@ function displayAnalysisResults(analysis, confidence) {
             <span class="analysis-label">Collection:</span>
             <span class="analysis-value">${analysis.collection_name || 'Unknown'}</span>
         </div>
+        ${analysis.isbn || analysis.isbn_13 || analysis.isbn_10 ? `
+        <div class="analysis-detail">
+            <span class="analysis-label">ISBN:</span>
+            <span class="analysis-value">${analysis.isbn || analysis.isbn_13 || analysis.isbn_10}</span>
+        </div>
+        ` : ''}
         <div class="analysis-detail">
             <span class="analysis-label">AI Confidence:</span>
             <span class="confidence-badge ${confidenceClass}">
@@ -379,6 +385,7 @@ function displayExtractionResults(data) {
             <div class="summary-stat">Pages: ${summary.total_pages || 0}</div>
             <div class="summary-stat">Words: ${(summary.total_words || 0).toLocaleString()}</div>
             <div class="summary-stat">Sections: ${data.sections_count || 0}</div>
+            ${summary.isbn ? `<div class="summary-stat">ISBN: ${summary.isbn}</div>` : ''}
         </div>
         ${summary.category_distribution ? generateCategoryDistribution(summary.category_distribution) : ''}
     `;
@@ -415,6 +422,7 @@ function populateMetadataReview(analysis, confidence) {
     document.getElementById('display-book-type').textContent = analysis.book_type || 'Unknown';
     document.getElementById('display-book-title').textContent = analysis.book_full_name || analysis.book_title || 'Unknown';
     document.getElementById('display-collection').textContent = analysis.collection_name || 'Unknown';
+    document.getElementById('display-isbn').textContent = analysis.isbn || analysis.isbn_13 || analysis.isbn_10 || 'Not found';
 
     // Update confidence display
     if (confidence) {
@@ -511,6 +519,7 @@ function toggleMetadataEdit() {
     document.getElementById('edit-book-type').value = document.getElementById('display-book-type').textContent;
     document.getElementById('edit-book-title').value = document.getElementById('display-book-title').textContent;
     document.getElementById('edit-collection').value = document.getElementById('display-collection').textContent;
+    document.getElementById('edit-isbn').value = document.getElementById('display-isbn').textContent;
 
     // Update button visibility
     editBtn.style.display = 'none';
@@ -531,6 +540,7 @@ function saveMetadataChanges() {
     document.getElementById('display-book-type').textContent = document.getElementById('edit-book-type').value;
     document.getElementById('display-book-title').textContent = document.getElementById('edit-book-title').value;
     document.getElementById('display-collection').textContent = document.getElementById('edit-collection').value;
+    document.getElementById('display-isbn').textContent = document.getElementById('edit-isbn').value;
 
     // Update stored analysis data
     if (currentAnalysisData) {
@@ -539,6 +549,7 @@ function saveMetadataChanges() {
         currentAnalysisData.book_type = document.getElementById('edit-book-type').value;
         currentAnalysisData.book_full_name = document.getElementById('edit-book-title').value;
         currentAnalysisData.collection_name = document.getElementById('edit-collection').value;
+        currentAnalysisData.isbn = document.getElementById('edit-isbn').value;
     }
 
     // Exit edit mode
@@ -577,7 +588,8 @@ function getCurrentMetadata() {
         edition: currentAnalysisData.edition,
         book_type: currentAnalysisData.book_type,
         book_full_name: currentAnalysisData.book_full_name,
-        collection_name: currentAnalysisData.collection_name
+        collection_name: currentAnalysisData.collection_name,
+        isbn: currentAnalysisData.isbn
     };
 }
 
@@ -979,6 +991,7 @@ function displayCollectionDocuments(data, dbType) {
                         <p class="card-text small">${doc.content || 'No content available'}</p>
                         ${doc.game_metadata ? `<small class="text-muted"><strong>Game:</strong> ${doc.game_metadata.game_type || 'Unknown'} ${doc.game_metadata.edition || ''} ${doc.game_metadata.book_type || ''}</small><br>` : ''}
                         ${doc.source_file ? `<small class="text-muted"><strong>Source:</strong> ${doc.source_file}</small><br>` : ''}
+                        ${doc.isbn || doc.isbn_13 || doc.isbn_10 ? `<small class="text-muted"><strong>ISBN:</strong> ${doc.isbn || doc.isbn_13 || doc.isbn_10}</small><br>` : ''}
                         ${doc.sections && Array.isArray(doc.sections) ? `<small class="text-muted"><strong>Sections:</strong> ${doc.sections.length}</small><br>` : ''}
                         ${doc.metadata ? `<small class="text-muted"><strong>Metadata:</strong> ${JSON.stringify(doc.metadata).substring(0, 100)}...</small><br>` : ''}
                         ${doc.word_count ? `<small class="text-muted"><strong>Words:</strong> ${doc.word_count}</small>` : ''}

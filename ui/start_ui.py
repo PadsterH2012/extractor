@@ -56,8 +56,20 @@ def check_environment():
     else:
         print("⚠️  Local LLM URL not set")
 
+    # Check MongoDB configuration
+    if os.getenv('MONGODB_HOST'):
+        print(f"✅ MongoDB host configured: {os.getenv('MONGODB_HOST')}")
+    else:
+        print("⚠️  MongoDB host not set (will use default: 10.202.28.46)")
+
+    if os.getenv('MONGODB_DATABASE'):
+        print(f"✅ MongoDB database configured: {os.getenv('MONGODB_DATABASE')}")
+    else:
+        print("⚠️  MongoDB database not set (will use default: rpger)")
+
     # Check ChromaDB (will be tested at runtime)
     print("ℹ️  ChromaDB connection will be tested when UI starts")
+    print("ℹ️  MongoDB connection will be tested when UI starts")
 
 def main():
     """Main startup function"""

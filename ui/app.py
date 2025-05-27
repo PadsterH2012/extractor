@@ -8,6 +8,7 @@ import os
 import sys
 import json
 import logging
+import requests
 from pathlib import Path
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_file, flash, redirect, url_for
@@ -21,6 +22,7 @@ from Modules.ai_game_detector import AIGameDetector
 from Modules.ai_categorizer import AICategorizer
 from Modules.pdf_processor import MultiGamePDFProcessor
 from Modules.multi_collection_manager import MultiGameCollectionManager
+from Modules.mongodb_manager import MongoDBManager
 
 app = Flask(__name__)
 app.secret_key = 'extraction_v3_ui_secret_key_change_in_production'
@@ -236,19 +238,29 @@ def import_to_chroma():
     try:
         data = request.get_json()
         session_id = data.get('session_id')
+        # Get any metadata overrides from the UI
+        metadata_overrides = data.get('metadata_overrides', {})
 
         if session_id not in extraction_results:
             return jsonify({'error': 'Extraction session not found'}), 400
 
         extraction = extraction_results[session_id]
         sections = extraction['sections']
-        game_metadata = extraction['game_metadata']
+        game_metadata = extraction['game_metadata'].copy()
+
+        # Apply any metadata overrides
+        game_metadata.update(metadata_overrides)
 
         # Initialize collection manager
         manager = MultiGameCollectionManager()
 
-        # Import to ChromaDB
-        collection_name = game_metadata['collection_name']
+        # Create hierarchical collection path: {game_type}.{edition}.{book_type}.{collection_name}
+        game_type = game_metadata.get('game_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
+        edition = game_metadata.get('edition', 'unknown').lower().replace(' ', '_').replace('&', 'and')
+        book_type = game_metadata.get('book_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
+        collection_base = game_metadata.get('collection_name', 'unknown')
+
+        collection_name = f"{game_type}.{edition}.{book_type}.{collection_base}"
         logger.info(f"Importing to ChromaDB collection: {collection_name}")
 
         # Convert sections to ChromaDB format
@@ -291,17 +303,86 @@ def import_to_mongodb():
     try:
         data = request.get_json()
         session_id = data.get('session_id')
+        split_sections = data.get('split_sections', False)  # New parameter
+        # Get any metadata overrides from the UI
+        metadata_overrides = data.get('metadata_overrides', {})
 
         if session_id not in extraction_results:
             return jsonify({'error': 'Extraction session not found'}), 400
 
-        # For now, return a placeholder response
-        # TODO: Implement MongoDB integration
-        return jsonify({
-            'success': True,
-            'message': 'MongoDB import functionality coming soon',
-            'note': 'Use MCP tools for monster data import'
-        })
+        extraction = extraction_results[session_id]
+        game_metadata = extraction['game_metadata'].copy()
+
+        # Apply any metadata overrides
+        game_metadata.update(metadata_overrides)
+
+        # Initialize MongoDB manager
+        mongodb_manager = MongoDBManager()
+
+        # Check if MongoDB is available and connected
+        if not mongodb_manager.connected:
+            return jsonify({
+                'success': False,
+                'error': 'MongoDB not connected',
+                'note': 'Check MongoDB configuration in .env file'
+            }), 500
+
+        # Option 1: Hierarchical collection names (current approach)
+        # Creates separate collections: source_material.dand.1st_edition.core_rules.dmg
+        use_hierarchical_collections = data.get('use_hierarchical_collections', True)
+
+        if use_hierarchical_collections:
+            # Create hierarchical collection path: rpger.source_material.{game_type}.{edition}.{book_type}.{collection_name}
+            game_type = game_metadata.get('game_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
+            edition = game_metadata.get('edition', 'unknown').lower().replace(' ', '_').replace('&', 'and')
+            book_type = game_metadata.get('book_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
+            collection_base = game_metadata.get('collection_name', 'unknown')
+
+            collection_name = f"source_material.{game_type}.{edition}.{book_type}.{collection_base}"
+        else:
+            # Option 2: Single collection with hierarchical documents
+            # All content goes in one collection with folder-like metadata
+            collection_name = "source_material"
+
+            # Add hierarchical metadata to each document
+            hierarchical_path = {
+                "game_type": game_metadata.get('game_type', 'unknown'),
+                "edition": game_metadata.get('edition', 'unknown'),
+                "book_type": game_metadata.get('book_type', 'unknown'),
+                "collection_name": game_metadata.get('collection_name', 'unknown'),
+                "full_path": f"{game_metadata.get('game_type', 'unknown')}/{game_metadata.get('edition', 'unknown')}/{game_metadata.get('book_type', 'unknown')}/{game_metadata.get('collection_name', 'unknown')}"
+            }
+
+            # Update extraction data to include hierarchical metadata
+            extraction['hierarchical_path'] = hierarchical_path
+        logger.info(f"Importing to MongoDB collection: {collection_name} (split_sections: {split_sections})")
+
+        success, message = mongodb_manager.import_extracted_content(
+            extraction,
+            collection_name,
+            split_sections=split_sections
+        )
+
+        if success:
+            # Get MongoDB connection details for display
+            mongodb_info = mongodb_manager.get_status()
+            return jsonify({
+                'success': True,
+                'message': f'Successfully imported to MongoDB collection: {collection_name}',
+                'collection': collection_name,
+                'document_id': message.split(': ')[-1] if ': ' in message else message,
+                'database_info': {
+                    'host': mongodb_info.get('host', 'Unknown'),
+                    'port': mongodb_info.get('port', 'Unknown'),
+                    'database': mongodb_info.get('database', 'Unknown'),
+                    'full_location': f"{mongodb_info.get('host', 'Unknown')}:{mongodb_info.get('port', 'Unknown')}/{mongodb_info.get('database', 'Unknown')}.{collection_name}"
+                }
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': message
+            }), 500
 
     except Exception as e:
         logger.error(f"MongoDB import error: {e}")
@@ -348,6 +429,16 @@ def system_status():
             chroma_status = f'Error: {str(e)}'
             chroma_collections = 0
 
+        # Check MongoDB connection
+        try:
+            mongodb_manager = MongoDBManager()
+            mongodb_info = mongodb_manager.get_status()
+            mongodb_status = mongodb_info['status']
+            mongodb_collections = mongodb_info.get('collections', 0)
+        except Exception as e:
+            mongodb_status = f'Error: {str(e)}'
+            mongodb_collections = 0
+
         # Check AI providers
         ai_providers = {
             'mock': 'Available',
@@ -359,6 +450,8 @@ def system_status():
         return jsonify({
             'chroma_status': chroma_status,
             'chroma_collections': chroma_collections,
+            'mongodb_status': mongodb_status,
+            'mongodb_collections': mongodb_collections,
             'ai_providers': ai_providers,
             'active_sessions': len(analysis_results),
             'completed_extractions': len(extraction_results)
@@ -366,6 +459,271 @@ def system_status():
 
     except Exception as e:
         logger.error(f"Status error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/browse_chromadb')
+def browse_chromadb():
+    """Browse ChromaDB collections and documents"""
+    try:
+        manager = MultiGameCollectionManager()
+        collections = manager.collections
+
+        # Get collection details
+        collection_details = []
+        for collection_name in collections:
+            info = manager.get_collection_info(collection_name)
+            if info:
+                collection_details.append({
+                    'name': collection_name,
+                    'document_count': info.get('document_count', 0),
+                    'game_type': manager.parse_collection_name(collection_name).get('game_type', 'Unknown')
+                })
+
+        return jsonify({
+            'success': True,
+            'collections': collection_details,
+            'total_collections': len(collection_details)
+        })
+
+    except Exception as e:
+        logger.error(f"ChromaDB browse error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/browse_chromadb/<collection_name>')
+def browse_chromadb_collection(collection_name):
+    """Browse specific ChromaDB collection documents"""
+    try:
+        limit = int(request.args.get('limit', 10))
+        offset = int(request.args.get('offset', 0))
+
+        manager = MultiGameCollectionManager()
+
+        # Get collection documents
+        collection_uuid = manager._get_collection_uuid(collection_name)
+        if not collection_uuid:
+            return jsonify({'error': f'Collection {collection_name} not found'}), 404
+
+        # Get documents from ChromaDB
+        get_url = f"{manager.base_url}/collections/{collection_uuid}/get"
+        params = {
+            "limit": limit,
+            "offset": offset
+        }
+
+        response = requests.post(get_url, json=params)
+        if response.status_code != 200:
+            return jsonify({'error': 'Failed to fetch documents'}), 500
+
+        data = response.json()
+        documents = data.get("documents", [])
+        metadatas = data.get("metadatas", [])
+        ids = data.get("ids", [])
+
+        # Format documents for display
+        formatted_docs = []
+        for i, doc in enumerate(documents):
+            formatted_docs.append({
+                'id': ids[i] if i < len(ids) else f'doc_{i}',
+                'content': doc[:200] + '...' if len(doc) > 200 else doc,  # Truncate for display
+                'full_content': doc,
+                'metadata': metadatas[i] if i < len(metadatas) else {},
+                'word_count': len(doc.split()) if doc else 0
+            })
+
+        return jsonify({
+            'success': True,
+            'collection': collection_name,
+            'documents': formatted_docs,
+            'total_shown': len(formatted_docs),
+            'offset': offset,
+            'limit': limit
+        })
+
+    except Exception as e:
+        logger.error(f"ChromaDB collection browse error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/browse_mongodb')
+def browse_mongodb():
+    """Browse MongoDB collections and documents"""
+    try:
+        mongodb_manager = MongoDBManager()
+
+        if not mongodb_manager.connected:
+            return jsonify({'error': 'MongoDB not connected'}), 500
+
+        # Get collection names
+        collection_names = mongodb_manager.database.list_collection_names()
+
+        # Get collection details
+        collection_details = []
+        for collection_name in collection_names:
+            try:
+                collection = mongodb_manager.database[collection_name]
+                doc_count = collection.count_documents({})
+
+                # Get sample document to show structure
+                sample_doc = collection.find_one()
+                sample_fields = list(sample_doc.keys()) if sample_doc else []
+
+                collection_details.append({
+                    'name': collection_name,
+                    'document_count': doc_count,
+                    'sample_fields': sample_fields[:10]  # First 10 fields
+                })
+            except Exception as e:
+                logger.warning(f"Error getting info for collection {collection_name}: {e}")
+
+        return jsonify({
+            'success': True,
+            'collections': collection_details,
+            'total_collections': len(collection_details),
+            'database_info': mongodb_manager.get_status()
+        })
+
+    except Exception as e:
+        logger.error(f"MongoDB browse error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/browse_mongodb/<collection_name>')
+def browse_mongodb_collection(collection_name):
+    """Browse specific MongoDB collection documents"""
+    try:
+        limit = int(request.args.get('limit', 10))
+        skip = int(request.args.get('skip', 0))
+
+        mongodb_manager = MongoDBManager()
+
+        if not mongodb_manager.connected:
+            return jsonify({'error': 'MongoDB not connected'}), 500
+
+        collection = mongodb_manager.database[collection_name]
+
+        # Get documents
+        cursor = collection.find().skip(skip).limit(limit)
+        documents = []
+
+        for doc in cursor:
+            # Convert ObjectId to string for JSON serialization
+            if '_id' in doc:
+                doc['_id'] = str(doc['_id'])
+
+            # Handle different content field names and structures
+            content_text = ""
+
+            # Check for various content fields
+            if 'content' in doc:
+                content_text = str(doc['content'])
+            elif 'sections' in doc and isinstance(doc['sections'], list):
+                # Extract content from sections array (AI extraction format)
+                section_texts = []
+                for section in doc['sections'][:3]:  # First 3 sections for preview
+                    if isinstance(section, dict) and 'content' in section:
+                        section_texts.append(str(section['content'])[:100])
+                    elif isinstance(section, str):
+                        section_texts.append(section[:100])
+                content_text = " | ".join(section_texts)
+            elif 'description' in doc:
+                content_text = str(doc['description'])
+            elif 'text' in doc:
+                content_text = str(doc['text'])
+            else:
+                # Try to find any text-like field
+                for key, value in doc.items():
+                    if key not in ['_id', 'import_date', 'created_at', 'metadata'] and isinstance(value, str) and len(value) > 20:
+                        content_text = str(value)
+                        break
+
+            # Truncate content for display
+            if content_text and len(content_text) > 200:
+                doc['content_preview'] = content_text[:200] + '...'
+                doc['content_full'] = content_text
+                doc['content'] = doc['content_preview']
+            elif content_text:
+                doc['content'] = content_text
+            else:
+                doc['content'] = "No content available"
+
+            documents.append(doc)
+
+        # Get total count
+        total_count = collection.count_documents({})
+
+        return jsonify({
+            'success': True,
+            'collection': collection_name,
+            'documents': documents,
+            'total_shown': len(documents),
+            'total_count': total_count,
+            'skip': skip,
+            'limit': limit
+        })
+
+    except Exception as e:
+        logger.error(f"MongoDB collection browse error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/query_game_edition', methods=['POST'])
+def query_game_edition():
+    """Query content across collections for a specific game/edition"""
+    try:
+        data = request.get_json()
+        game_type = data.get('game_type')
+        edition = data.get('edition')
+        book_type = data.get('book_type')
+
+        if not game_type:
+            return jsonify({'error': 'game_type is required'}), 400
+
+        mongodb_manager = MongoDBManager()
+
+        if not mongodb_manager.connected:
+            return jsonify({'error': 'MongoDB not connected'}), 500
+
+        # Query across collections
+        results = mongodb_manager.query_by_game_edition(game_type, edition, book_type)
+
+        # Format results for display
+        formatted_results = []
+        for doc in results:
+            # Convert ObjectId to string for JSON serialization
+            if '_id' in doc:
+                doc['_id'] = str(doc['_id'])
+
+            # Extract content preview
+            content_preview = ""
+            if 'content' in doc:
+                content_preview = str(doc['content'])[:200] + '...' if len(str(doc['content'])) > 200 else str(doc['content'])
+            elif 'sections' in doc and isinstance(doc['sections'], list) and doc['sections']:
+                # Get content from first section
+                first_section = doc['sections'][0]
+                if isinstance(first_section, dict) and 'content' in first_section:
+                    content_preview = str(first_section['content'])[:200] + '...'
+
+            formatted_results.append({
+                'id': doc.get('_id', 'unknown'),
+                'source_collection': doc.get('_source_collection', 'unknown'),
+                'collection_parts': doc.get('_collection_parts', {}),
+                'content_preview': content_preview,
+                'sections_count': len(doc.get('sections', [])) if 'sections' in doc else 0,
+                'title': doc.get('title', 'Untitled'),
+                'category': doc.get('category', 'Unknown')
+            })
+
+        return jsonify({
+            'success': True,
+            'query': {
+                'game_type': game_type,
+                'edition': edition,
+                'book_type': book_type
+            },
+            'results': formatted_results,
+            'total_results': len(formatted_results),
+            'collections_searched': len(set(r['source_collection'] for r in formatted_results))
+        })
+
+    except Exception as e:
+        logger.error(f"Game edition query error: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':

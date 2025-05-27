@@ -12,6 +12,14 @@ from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
+# Import MongoDB manager for dual-database functionality
+try:
+    from .mongodb_manager import MongoDBManager
+    MONGODB_AVAILABLE = True
+except ImportError:
+    MONGODB_AVAILABLE = False
+    MongoDBManager = None
+
 # Try to import dotenv for loading environment variables from .env file
 try:
     from dotenv import load_dotenv
@@ -46,6 +54,17 @@ class MultiGameCollectionManager:
         self.base_url = f"{CHROMA_CONFIG['base_url']}/tenants/{CHROMA_CONFIG['tenant']}/databases/{CHROMA_CONFIG['database']}"
         self.collections = self.discover_collections()
         self.game_collections = self.organize_by_game_type()
+
+        # Initialize MongoDB manager for dual-database functionality
+        self.mongodb_manager = None
+        if MONGODB_AVAILABLE:
+            try:
+                self.mongodb_manager = MongoDBManager(debug=debug)
+                if self.debug and self.mongodb_manager.connected:
+                    print("✅ MongoDB integration enabled")
+            except Exception as e:
+                if self.debug:
+                    print(f"⚠️  MongoDB integration failed: {e}")
 
     def parse_collection_name(self, collection_name: str) -> Dict[str, str]:
         """Parse collection name to extract game type, edition, and book"""
@@ -501,12 +520,14 @@ class MultiGameCollectionManager:
 
             response = requests.post(add_url, json=payload)
 
-            if response.status_code == 200:
+            if response.status_code in [200, 201]:  # Accept both 200 OK and 201 Created
                 if self.debug:
                     print(f"✅ Added {len(documents)} documents to {collection_name}")
                 return True
             else:
                 print(f"❌ Failed to add documents: {response.status_code}")
+                if self.debug:
+                    print(f"Response: {response.text}")
                 return False
 
         except Exception as e:
@@ -587,7 +608,7 @@ class MultiGameCollectionManager:
 
             response = requests.post(create_url, json=payload)
 
-            if response.status_code == 200:
+            if response.status_code in [200, 201]:  # Accept both 200 OK and 201 Created
                 collection_data = response.json()
                 collection_uuid = collection_data.get("id")
 
@@ -599,11 +620,17 @@ class MultiGameCollectionManager:
                 return collection_uuid
             else:
                 print(f"❌ Failed to create collection: {response.status_code}")
+                if self.debug:
+                    print(f"Response: {response.text}")
                 return None
 
         except Exception as e:
             print(f"❌ Collection creation failed: {e}")
             return None
+
+    def _get_collection_uuid(self, collection_name: str) -> Optional[str]:
+        """Get UUID for existing collection"""
+        return self.collections.get(collection_name)
 
     def _import_document(self, collection_uuid: str, document: Dict) -> bool:
         """Import a single document to collection"""
@@ -632,9 +659,125 @@ class MultiGameCollectionManager:
                 }
 
             response = requests.post(add_url, json=payload)
-            return response.status_code == 200
+            return response.status_code in [200, 201]  # Accept both 200 OK and 201 Created
 
         except Exception as e:
             if self.debug:
                 print(f"❌ Document import failed: {e}")
             return False
+
+    def upload_search_results_to_mongodb(self, search_results: List[Dict],
+                                       mongo_collection: str,
+                                       source_collection: str = "unknown") -> bool:
+        """Upload ChromaDB search results to MongoDB collection"""
+        if not self.mongodb_manager or not self.mongodb_manager.connected:
+            if self.debug:
+                print("❌ MongoDB not available for upload")
+            return False
+
+        try:
+            success, message = self.mongodb_manager.upload_chromadb_results(
+                search_results, mongo_collection, source_collection
+            )
+
+            if success:
+                if self.debug:
+                    print(f"✅ {message}")
+                return True
+            else:
+                if self.debug:
+                    print(f"❌ MongoDB upload failed: {message}")
+                return False
+
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Error uploading to MongoDB: {e}")
+            return False
+
+    def transfer_collection_to_mongodb(self, collection_name: str,
+                                     mongo_collection: str,
+                                     batch_size: int = 100) -> bool:
+        """Transfer entire ChromaDB collection to MongoDB"""
+        if not self.mongodb_manager or not self.mongodb_manager.connected:
+            if self.debug:
+                print("❌ MongoDB not available for transfer")
+            return False
+
+        try:
+            # Get all documents from ChromaDB collection
+            collection_uuid = self._get_collection_uuid(collection_name)
+            if not collection_uuid:
+                if self.debug:
+                    print(f"❌ Collection '{collection_name}' not found")
+                return False
+
+            # Get collection documents in batches
+            offset = 0
+            total_transferred = 0
+
+            while True:
+                # Get batch of documents
+                get_url = f"{self.base_url}/collections/{collection_uuid}/get"
+                params = {
+                    "limit": batch_size,
+                    "offset": offset
+                }
+
+                response = requests.post(get_url, json=params)
+                if response.status_code != 200:
+                    break
+
+                data = response.json()
+                documents = data.get("documents", [])
+                metadatas = data.get("metadatas", [])
+                ids = data.get("ids", [])
+
+                if not documents:
+                    break
+
+                # Convert to ChromaDB format for MongoDB upload
+                chroma_results = []
+                for i, doc in enumerate(documents):
+                    chroma_doc = {
+                        "id": ids[i] if i < len(ids) else f"doc_{i}",
+                        "document": doc,
+                        "metadata": metadatas[i] if i < len(metadatas) else {}
+                    }
+                    chroma_results.append(chroma_doc)
+
+                # Upload batch to MongoDB
+                success, message = self.mongodb_manager.upload_chromadb_results(
+                    chroma_results, mongo_collection, collection_name
+                )
+
+                if not success:
+                    if self.debug:
+                        print(f"❌ Batch upload failed: {message}")
+                    return False
+
+                total_transferred += len(chroma_results)
+                offset += batch_size
+
+                if self.debug:
+                    print(f"📤 Transferred {total_transferred} documents...")
+
+                # If we got fewer documents than batch_size, we're done
+                if len(documents) < batch_size:
+                    break
+
+            if self.debug:
+                print(f"✅ Successfully transferred {total_transferred} documents from '{collection_name}' to MongoDB collection '{mongo_collection}'")
+
+            return True
+
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Error transferring collection: {e}")
+            return False
+
+    def get_mongodb_status(self) -> Dict:
+        """Get MongoDB connection status"""
+        if not self.mongodb_manager:
+            return {"status": "MongoDB not available", "connected": False}
+
+        return self.mongodb_manager.get_status()

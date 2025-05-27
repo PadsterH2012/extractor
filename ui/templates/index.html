@@ -133,6 +133,71 @@
                     </div>
                     <div class="card-body">
                         <p class="text-muted">Import extracted content to your preferred database.</p>
+
+                        <!-- Metadata Review Section -->
+                        <div class="alert alert-info" id="metadata-review" style="display: none;">
+                            <h6><i class="fas fa-edit"></i> Review & Edit Metadata</h6>
+                            <p class="small mb-3">Review the AI-detected metadata below. Click "Edit" to make changes before importing.</p>
+
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="mb-2">
+                                        <label class="form-label small"><strong>Game Type:</strong></label>
+                                        <div class="metadata-display" id="display-game-type"></div>
+                                        <input type="text" class="form-control form-control-sm metadata-edit" id="edit-game-type" style="display: none;">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small"><strong>Edition:</strong></label>
+                                        <div class="metadata-display" id="display-edition"></div>
+                                        <input type="text" class="form-control form-control-sm metadata-edit" id="edit-edition" style="display: none;">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small"><strong>Book Type:</strong></label>
+                                        <div class="metadata-display" id="display-book-type"></div>
+                                        <input type="text" class="form-control form-control-sm metadata-edit" id="edit-book-type" style="display: none;">
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="mb-2">
+                                        <label class="form-label small"><strong>Book Title:</strong></label>
+                                        <div class="metadata-display" id="display-book-title"></div>
+                                        <input type="text" class="form-control form-control-sm metadata-edit" id="edit-book-title" style="display: none;">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small"><strong>Collection Name:</strong></label>
+                                        <div class="metadata-display" id="display-collection"></div>
+                                        <input type="text" class="form-control form-control-sm metadata-edit" id="edit-collection" style="display: none;">
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small"><strong>Organization Style:</strong></label>
+                                        <select class="form-select form-select-sm" id="organization-style" onchange="updatePathPreview()">
+                                            <option value="separate">Separate Collections (Recommended)</option>
+                                            <option value="single">Single Collection with Folders</option>
+                                        </select>
+                                        <small class="text-muted">Choose how to organize content in MongoDB</small>
+                                    </div>
+                                    <div class="mb-2">
+                                        <label class="form-label small"><strong>Generated Path:</strong></label>
+                                        <div class="text-muted small" id="generated-path">
+                                            <span id="path-type">Collection:</span> rpger.<span id="path-preview">...</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mt-3">
+                                <button class="btn btn-outline-primary btn-sm me-2" id="edit-metadata-btn" onclick="toggleMetadataEdit()">
+                                    <i class="fas fa-edit"></i> Edit Metadata
+                                </button>
+                                <button class="btn btn-success btn-sm me-2" id="save-metadata-btn" onclick="saveMetadataChanges()" style="display: none;">
+                                    <i class="fas fa-save"></i> Save Changes
+                                </button>
+                                <button class="btn btn-secondary btn-sm" id="cancel-metadata-btn" onclick="cancelMetadataEdit()" style="display: none;">
+                                    <i class="fas fa-times"></i> Cancel
+                                </button>
+                            </div>
+                        </div>
+
                         <div class="row">
                             <div class="col-md-6">
                                 <button class="btn btn-info w-100 mb-2" onclick="importToChroma()">
@@ -140,9 +205,21 @@
                                 </button>
                             </div>
                             <div class="col-md-6">
-                                <button class="btn btn-secondary w-100 mb-2" onclick="importToMongoDB()">
-                                    <i class="fas fa-leaf"></i> Import to MongoDB
-                                </button>
+                                <div class="dropdown">
+                                    <button class="btn btn-secondary w-100 mb-2 dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                                        <i class="fas fa-leaf"></i> Import to MongoDB
+                                    </button>
+                                    <ul class="dropdown-menu w-100">
+                                        <li><a class="dropdown-item" href="#" onclick="importToMongoDB(false)">
+                                            <i class="fas fa-file"></i> Single Document (v3 style)
+                                            <br><small class="text-muted">All sections in one document</small>
+                                        </a></li>
+                                        <li><a class="dropdown-item" href="#" onclick="importToMongoDB(true)">
+                                            <i class="fas fa-files"></i> Split Sections (v1/v2 style)
+                                            <br><small class="text-muted">Each section as separate document</small>
+                                        </a></li>
+                                    </ul>
+                                </div>
                             </div>
                         </div>
                         <div class="row mt-2">
@@ -169,6 +246,14 @@
                     <div class="card-body">
                         <div id="status-content">
                             <p class="text-muted">Click "Status" to check system health</p>
+                        </div>
+                        <div class="mt-3">
+                            <button class="btn btn-outline-primary btn-sm me-2" onclick="browseChromaDB()">
+                                <i class="fas fa-database"></i> Browse ChromaDB
+                            </button>
+                            <button class="btn btn-outline-success btn-sm" onclick="browseMongoDB()">
+                                <i class="fas fa-leaf"></i> Browse MongoDB
+                            </button>
                         </div>
                     </div>
                 </div>

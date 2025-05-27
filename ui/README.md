@@ -1,7 +1,7 @@
 # AI-Powered Extraction v3 Web UI
 
-> **Modern web interface for PDF analysis and extraction**  
-> **Status**: 🚀 Ready to Use  
+> **Modern web interface for PDF analysis and extraction**
+> **Status**: 🚀 Ready to Use
 > **Technology**: Flask + Bootstrap + JavaScript
 
 ## 🎯 Overview
@@ -106,6 +106,18 @@ export LOCAL_LLM_MODEL="llama2"
 - **Collections**: Auto-created during import
 - **Status**: Real-time connection monitoring
 
+### MongoDB
+```bash
+# MongoDB Configuration
+export MONGODB_HOST="10.202.28.46"
+export MONGODB_PORT="27017"
+export MONGODB_DATABASE="rpger"
+
+# Optional: Authentication
+export MONGODB_USERNAME="your_username"
+export MONGODB_PASSWORD="your_password"
+```
+
 ## 📁 File Structure
 
 ```
@@ -207,9 +219,11 @@ The UI runs in debug mode by default, providing:
 - **Vector Import**: Proper vector database formatting
 
 ### With MongoDB
-- **Planned Integration**: MongoDB import coming soon
+- **Full Integration**: MongoDB import now available
+- **Dual Database**: Works alongside ChromaDB for complete coverage
 - **MCP Compatibility**: Works with existing MCP tools
 - **Monster Data**: Special handling for monster imports
+- **Schema Conversion**: Automatic ChromaDB to MongoDB format conversion
 
 ## 🎉 Success Examples
 

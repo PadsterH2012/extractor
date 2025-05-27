@@ -310,6 +310,12 @@ function displayAnalysisResults(analysis, confidence) {
             <span class="analysis-label">Collection:</span>
             <span class="analysis-value">${analysis.collection_name || 'Unknown'}</span>
         </div>
+        ${analysis.isbn || analysis.isbn_13 || analysis.isbn_10 ? `
+        <div class="analysis-detail">
+            <span class="analysis-label">ISBN:</span>
+            <span class="analysis-value">${analysis.isbn || analysis.isbn_13 || analysis.isbn_10}</span>
+        </div>
+        ` : ''}
         <div class="analysis-detail">
             <span class="analysis-label">AI Confidence:</span>
             <span class="confidence-badge ${confidenceClass}">
@@ -389,6 +395,7 @@ function displayExtractionResults(data) {
             <div class="summary-stat">Pages: ${summary.total_pages || 0}</div>
             <div class="summary-stat">Words: ${(summary.total_words || 0).toLocaleString()}</div>
             <div class="summary-stat">Sections: ${data.sections_count || 0}</div>
+            ${summary.isbn ? `<div class="summary-stat">ISBN: ${summary.isbn}</div>` : ''}
         </div>
     `;
 
@@ -461,13 +468,19 @@ function showImportCard() {
 
 // Populate metadata review section
 function populateMetadataReview(analysis, confidence) {
-    document.getElementById('display-content-type').textContent = 
+    document.getElementById('display-content-type').textContent =
         analysis.content_type ? (analysis.content_type === 'novel' ? 'Novel' : 'Source Material') : 'Source Material';
     document.getElementById('display-game-type').textContent = analysis.game_type || 'Unknown';
     document.getElementById('display-edition').textContent = analysis.edition || 'Unknown';
     document.getElementById('display-book-type').textContent = analysis.book_type || 'Unknown';
     document.getElementById('display-book-title').textContent = analysis.book_full_name || analysis.book_title || 'Unknown';
     document.getElementById('display-collection').textContent = analysis.collection_name || 'Unknown';
+    document.getElementById('display-isbn').textContent = analysis.isbn || analysis.isbn_13 || analysis.isbn_10 || 'Not found';
+
+    // Set the dropdown to match the content type
+    if (document.getElementById('edit-content-type')) {
+        document.getElementById('edit-content-type').value = analysis.content_type || 'source_material';
+    }
 
     // Set the dropdown to match the content type
     if (document.getElementById('edit-content-type')) {
@@ -534,10 +547,10 @@ function getQualityBadgeClass(grade) {
 
 // Update path preview
 function updatePathPreview() {
-    const contentType = (document.getElementById('edit-content-type') ? 
-                         document.getElementById('edit-content-type').value : 
+    const contentType = (document.getElementById('edit-content-type') ?
+                         document.getElementById('edit-content-type').value :
                          (currentAnalysisData?.content_type || 'source_material'));
-    
+
     const gameType = (document.getElementById('edit-game-type').value ||
                      document.getElementById('display-game-type').textContent || 'unknown')
                      .toLowerCase().replace(/\s+/g, '_').replace(/&/g, 'and');
@@ -586,6 +599,7 @@ function toggleMetadataEdit() {
     document.getElementById('edit-book-type').value = document.getElementById('display-book-type').textContent;
     document.getElementById('edit-book-title').value = document.getElementById('display-book-title').textContent;
     document.getElementById('edit-collection').value = document.getElementById('display-collection').textContent;
+    document.getElementById('edit-isbn').value = document.getElementById('display-isbn').textContent;
 
     // Update button visibility
     editBtn.style.display = 'none';
@@ -601,13 +615,14 @@ function toggleMetadataEdit() {
 // Save metadata changes
 function saveMetadataChanges() {
     // Update display values
-    document.getElementById('display-content-type').textContent = 
+    document.getElementById('display-content-type').textContent =
         document.getElementById('edit-content-type').value === 'novel' ? 'Novel' : 'Source Material';
     document.getElementById('display-game-type').textContent = document.getElementById('edit-game-type').value;
     document.getElementById('display-edition').textContent = document.getElementById('edit-edition').value;
     document.getElementById('display-book-type').textContent = document.getElementById('edit-book-type').value;
     document.getElementById('display-book-title').textContent = document.getElementById('edit-book-title').value;
     document.getElementById('display-collection').textContent = document.getElementById('edit-collection').value;
+    document.getElementById('display-isbn').textContent = document.getElementById('edit-isbn').value;
 
     // Update stored analysis data
     if (currentAnalysisData) {
@@ -617,6 +632,7 @@ function saveMetadataChanges() {
         currentAnalysisData.book_type = document.getElementById('edit-book-type').value;
         currentAnalysisData.book_full_name = document.getElementById('edit-book-title').value;
         currentAnalysisData.collection_name = document.getElementById('edit-collection').value;
+        currentAnalysisData.isbn = document.getElementById('edit-isbn').value;
     }
 
     // Exit edit mode
@@ -656,7 +672,8 @@ function getCurrentMetadata() {
         edition: currentAnalysisData.edition,
         book_type: currentAnalysisData.book_type,
         book_full_name: currentAnalysisData.book_full_name,
-        collection_name: currentAnalysisData.collection_name
+        collection_name: currentAnalysisData.collection_name,
+        isbn: currentAnalysisData.isbn
     };
 }
 
@@ -1234,6 +1251,11 @@ function displayCollectionDocuments(data, dbType) {
                                 </span>
                             ` : ''}
 
+                            ${doc.isbn || doc.isbn_13 || doc.isbn_10 ? `
+                                <span class="meta-tag isbn">
+                                    <i class="fas fa-barcode"></i> ISBN: ${doc.isbn || doc.isbn_13 || doc.isbn_10}
+                                </span>
+                            ` : ''}
                             ${doc.page ? `
                                 <span class="meta-tag page">
                                     <i class="fas fa-bookmark"></i> Page ${doc.page}

@@ -985,10 +985,16 @@ def browse_mongodb():
         logger.error(f"MongoDB browse error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/browse_mongodb/<collection_name>')
+@app.route('/browse_mongodb/<path:collection_name>')
 def browse_mongodb_collection(collection_name):
     """Browse specific MongoDB collection documents"""
     try:
+        # URL decode the collection name to handle special characters
+        from urllib.parse import unquote
+        decoded_collection_name = unquote(collection_name)
+
+        logger.info(f"Browsing MongoDB collection: {decoded_collection_name} (original: {collection_name})")
+
         limit = int(request.args.get('limit', 10))
         skip = int(request.args.get('skip', 0))
 
@@ -997,7 +1003,7 @@ def browse_mongodb_collection(collection_name):
         if not mongodb_manager.connected:
             return jsonify({'error': 'MongoDB not connected'}), 500
 
-        collection = mongodb_manager.database[collection_name]
+        collection = mongodb_manager.database[decoded_collection_name]
 
         # Get documents
         cursor = collection.find().skip(skip).limit(limit)
@@ -1051,7 +1057,7 @@ def browse_mongodb_collection(collection_name):
 
         return jsonify({
             'success': True,
-            'collection': collection_name,
+            'collection': decoded_collection_name,
             'documents': documents,
             'total_shown': len(documents),
             'total_count': total_count,
@@ -1126,22 +1132,28 @@ def query_game_edition():
         logger.error(f"Game edition query error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/mongodb/collections/<collection_name>/deletion-info', methods=['GET'])
+@app.route('/api/mongodb/collections/<path:collection_name>/deletion-info', methods=['GET'])
 def get_collection_deletion_info(collection_name):
     """Get information needed for safe collection deletion"""
     try:
+        # URL decode the collection name to handle special characters
+        from urllib.parse import unquote
+        decoded_collection_name = unquote(collection_name)
+
+        logger.info(f"Getting deletion info for MongoDB collection: {decoded_collection_name}")
+
         mongodb_manager = MongoDBManager()
 
         if not mongodb_manager.connected:
             return jsonify({'success': False, 'error': 'MongoDB not connected'}), 500
 
         # Get collection metadata
-        collection_info = mongodb_manager.get_collection_info(collection_name)
+        collection_info = mongodb_manager.get_collection_info(decoded_collection_name)
         if not collection_info:
             return jsonify({'success': False, 'error': 'Collection not found'}), 404
 
         # Check safety constraints
-        safety_check = mongodb_manager.check_deletion_safety(collection_name)
+        safety_check = mongodb_manager.check_deletion_safety(decoded_collection_name)
 
         # Get recent activity (simplified - just document count for now)
         recent_activity = {
@@ -1167,17 +1179,23 @@ def get_collection_deletion_info(collection_name):
         logger.error(f"Error getting collection deletion info: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-@app.route('/api/mongodb/collections/<collection_name>/delete', methods=['POST'])
+@app.route('/api/mongodb/collections/<path:collection_name>/delete', methods=['POST'])
 def delete_mongodb_collection(collection_name):
     """Delete a MongoDB collection with safety checks"""
     try:
+        # URL decode the collection name to handle special characters
+        from urllib.parse import unquote
+        decoded_collection_name = unquote(collection_name)
+
+        logger.info(f"Deleting MongoDB collection: {decoded_collection_name}")
+
         data = request.get_json()
         confirmation_name = data.get('confirmation_name', '')
         create_backup = data.get('create_backup', True)
         admin_password = data.get('admin_password', '')
 
-        # Validate request
-        if not confirmation_name or confirmation_name != collection_name:
+        # Validate request (compare with decoded name)
+        if not confirmation_name or confirmation_name != decoded_collection_name:
             return jsonify({
                 'success': False,
                 'error': 'Collection name confirmation does not match'

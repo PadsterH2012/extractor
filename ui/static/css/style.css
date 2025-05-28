@@ -1173,6 +1173,347 @@ body {
     letter-spacing: -0.01em;
 }
 
+/* Document Explorer Styles */
+.document-fields-panel {
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    padding: 1rem;
+    height: 500px;
+    overflow-y: auto;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.document-content-panel {
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 8px;
+    padding: 1rem;
+    height: 500px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.field-item {
+    margin: 2px 0;
+}
+
+.field-header {
+    display: flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.875rem;
+}
+
+.field-header:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.field-header.selected {
+    background: rgba(13, 110, 253, 0.2);
+    border: 1px solid rgba(13, 110, 253, 0.4);
+}
+
+.field-toggle {
+    margin-right: 4px;
+    width: 12px;
+    font-size: 0.75rem;
+    color: #000000;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.field-icon {
+    margin-right: 6px;
+    width: 14px;
+    font-size: 0.75rem;
+    color: #000000;
+    font-weight: 600;
+}
+
+.field-name {
+    flex: 1;
+    color: #000000;
+    font-weight: 700;
+    text-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
+}
+
+.field-type {
+    font-size: 0.75rem;
+    color: #000000;
+    font-weight: 600;
+    margin-left: 8px;
+    padding: 2px 8px;
+    background: rgba(255, 255, 255, 0.8);
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
+}
+
+.field-count {
+    font-size: 0.75rem;
+    color: #ffc107;
+    margin-left: 4px;
+}
+
+.field-children {
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    margin-left: 8px;
+}
+
+#document-content-viewer {
+    height: 420px;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    padding: 1rem;
+}
+
+.content-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: #6c757d;
+    text-align: center;
+}
+
+.content-placeholder i {
+    font-size: 2rem;
+    margin-bottom: 1rem;
+    opacity: 0.5;
+}
+
+.field-path-header {
+    background: rgba(255, 255, 255, 0.9);
+    padding: 0.75rem;
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    font-family: 'Courier New', monospace;
+    font-size: 0.875rem;
+    color: #000000;
+    font-weight: 600;
+}
+
+.json-viewer pre {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 1rem;
+    color: #e9ecef;
+    font-size: 0.875rem;
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.formatted-viewer .field-content {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: 1rem;
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.string-content {
+    color: #e9ecef;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.number-content {
+    color: #ffc107;
+    font-weight: 600;
+    font-family: 'Courier New', monospace;
+}
+
+.boolean-content {
+    color: #20c997;
+    font-weight: 600;
+    font-family: 'Courier New', monospace;
+}
+
+.array-content .array-info {
+    color: #6c757d;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.array-items {
+    margin: 0;
+    padding-left: 1.5rem;
+}
+
+.array-items li {
+    margin: 0.25rem 0;
+    color: #e9ecef;
+    word-break: break-word;
+}
+
+.object-content .object-info {
+    color: #6c757d;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem;
+}
+
+.object-properties {
+    margin: 0;
+    padding-left: 1.5rem;
+    list-style: none;
+}
+
+.object-properties li {
+    margin: 0.25rem 0;
+    color: #e9ecef;
+    word-break: break-word;
+}
+
+.unknown-content {
+    color: #e9ecef;
+    font-family: 'Courier New', monospace;
+    word-break: break-word;
+}
+
+/* Custom scrollbar for document explorer */
+.document-fields-panel::-webkit-scrollbar,
+.document-content-panel::-webkit-scrollbar,
+#document-content-viewer::-webkit-scrollbar,
+.json-viewer pre::-webkit-scrollbar,
+.formatted-viewer .field-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.document-fields-panel::-webkit-scrollbar-track,
+.document-content-panel::-webkit-scrollbar-track,
+#document-content-viewer::-webkit-scrollbar-track,
+.json-viewer pre::-webkit-scrollbar-track,
+.formatted-viewer .field-content::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.document-fields-panel::-webkit-scrollbar-thumb,
+.document-content-panel::-webkit-scrollbar-thumb,
+#document-content-viewer::-webkit-scrollbar-thumb,
+.json-viewer pre::-webkit-scrollbar-thumb,
+.formatted-viewer .field-content::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+}
+
+.document-fields-panel::-webkit-scrollbar-thumb:hover,
+.document-content-panel::-webkit-scrollbar-thumb:hover,
+#document-content-viewer::-webkit-scrollbar-thumb:hover,
+.json-viewer pre::-webkit-scrollbar-thumb:hover,
+.formatted-viewer .field-content::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Pagination Controls */
+.pagination-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 1.25rem;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.15), rgba(118, 75, 162, 0.15));
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    border: 2px solid rgba(102, 126, 234, 0.3);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.pagination-info {
+    color: #000000;
+    font-size: 1.1rem;
+    font-weight: 900;
+    text-shadow: 0 0 4px rgba(255, 255, 255, 1), 0 1px 2px rgba(255, 255, 255, 0.9);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.pagination-info::before {
+    content: "📄";
+    font-size: 1.1rem;
+}
+
+.pagination-buttons {
+    display: flex;
+    gap: 0.75rem;
+}
+
+.pagination-buttons .btn {
+    border: 2px solid rgba(255, 255, 255, 0.8);
+    background: rgba(255, 255, 255, 0.95);
+    color: #000000;
+    font-weight: 900;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    text-shadow: 0 0 2px rgba(255, 255, 255, 1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.pagination-buttons .btn:hover:not(:disabled) {
+    background: rgba(102, 126, 234, 0.8);
+    border-color: rgba(255, 255, 255, 0.8);
+    color: #ffffff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.pagination-buttons .btn:active:not(:disabled) {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.2);
+}
+
+.pagination-buttons .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: rgba(255, 255, 255, 0.7);
+    border-color: rgba(255, 255, 255, 0.6);
+    color: rgba(0, 0, 0, 0.6);
+    font-weight: 700;
+    transform: none;
+    box-shadow: none;
+}
+
+.pagination-buttons .btn i {
+    margin: 0 0.25rem;
+}
+
+/* Pagination Animation */
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.pagination-controls {
+    animation: fadeInUp 0.4s ease-out;
+}
+
+/* Pulse effect for page info */
+@keyframes pulseGlow {
+    0%, 100% {
+        text-shadow: 0 0 4px rgba(255, 255, 255, 1), 0 1px 2px rgba(255, 255, 255, 0.9);
+    }
+    50% {
+        text-shadow: 0 0 4px rgba(255, 255, 255, 1), 0 1px 2px rgba(255, 255, 255, 0.9), 0 0 12px rgba(102, 126, 234, 0.8);
+    }
+}
+
+.pagination-info {
+    animation: pulseGlow 2s ease-in-out infinite;
+}
+
 .documents-title {
     letter-spacing: -0.02em;
 }

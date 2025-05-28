@@ -1484,22 +1484,59 @@ function showCollectionLoading(collectionName) {
 
 // Browse specific collection
 function browseCollection(dbType, collectionName) {
-    const endpoint = dbType === 'chromadb' ?
-        `/browse_chromadb/${collectionName}` :
-        `/browse_mongodb/${collectionName}`;
+    loadCollectionPage(dbType, collectionName, 0, 5);
+}
 
-    fetch(endpoint + '?limit=5')
-    .then(response => response.json())
+// Load collection page with pagination
+function loadCollectionPage(dbType, collectionName, skip = 0, limit = 5) {
+    // Show loading state
+    const detailsDiv = document.getElementById('collection-details');
+    detailsDiv.innerHTML = '<div class="text-center"><i class="fas fa-spinner fa-spin"></i> Loading documents...</div>';
+
+    // Properly encode collection name for URL
+    const encodedCollectionName = encodeURIComponent(collectionName);
+    const endpoint = dbType === 'chromadb' ?
+        `/browse_chromadb/${encodedCollectionName}` :
+        `/browse_mongodb/${encodedCollectionName}`;
+
+    console.log(`Loading collection page: ${collectionName} (skip: ${skip}, limit: ${limit})`);
+
+    fetch(`${endpoint}?limit=${limit}&skip=${skip}`)
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+    })
     .then(data => {
         if (data.success) {
             displayCollectionDocuments(data, dbType);
         } else {
+            console.error('Collection browse failed:', data);
             showToast('Failed to browse collection: ' + (data.error || 'Unknown error'), 'error');
+
+            // Show error in the collection details panel
+            detailsDiv.innerHTML = `
+                <div class="documents-empty">
+                    <i class="fas fa-exclamation-triangle text-warning"></i>
+                    <h6>Error Loading Collection</h6>
+                    <p class="mb-0">${data.error || 'Unknown error occurred'}</p>
+                </div>
+            `;
         }
     })
     .catch(error => {
         console.error('Collection browse error:', error);
         showToast('Collection browse failed: ' + error.message, 'error');
+
+        // Show error in the collection details panel
+        detailsDiv.innerHTML = `
+            <div class="documents-empty">
+                <i class="fas fa-exclamation-triangle text-danger"></i>
+                <h6>Connection Error</h6>
+                <p class="mb-0">Failed to load collection: ${error.message}</p>
+            </div>
+        `;
     });
 }
 
@@ -1518,13 +1555,36 @@ function displayCollectionDocuments(data, dbType) {
             </div>
         </div>
 
-        <div class="documents-list" style="max-height: 450px; overflow-y: auto;">
+        ${data.total_count > data.limit ? `
+            <div class="pagination-controls">
+                <div class="pagination-info">
+                    Page ${Math.floor(data.skip / data.limit) + 1} of ${Math.ceil(data.total_count / data.limit)}
+                </div>
+                <div class="pagination-buttons">
+                    <button class="btn btn-sm btn-outline-light"
+                            onclick="loadCollectionPage('${dbType}', '${data.collection}', ${Math.max(0, data.skip - data.limit)}, ${data.limit})"
+                            ${data.skip === 0 ? 'disabled' : ''}>
+                        <i class="fas fa-chevron-left"></i> Previous
+                    </button>
+                    <button class="btn btn-sm btn-outline-light"
+                            onclick="loadCollectionPage('${dbType}', '${data.collection}', ${data.skip + data.limit}, ${data.limit})"
+                            ${data.skip + data.limit >= data.total_count ? 'disabled' : ''}>
+                        Next <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        ` : ''}
+
+        <div class="documents-list" style="max-height: 450px; overflow-y: auto; overflow-x: hidden;">
             ${data.documents.length > 0 ? data.documents.map((doc, index) => `
                 <div class="document-card">
                     <div class="document-card-body">
                         <div class="document-title">
                             <i class="fas fa-file-text"></i>
                             ${doc.id || doc._id || `Document ${index + 1}`}
+                            <button class="btn btn-sm btn-outline-primary ms-2" onclick="expandDocument(${index}, '${dbType}')">
+                                <i class="fas fa-expand-alt"></i> Explore
+                            </button>
                         </div>
 
                         <div class="document-content">
@@ -1588,6 +1648,329 @@ function displayCollectionDocuments(data, dbType) {
     `;
 
     detailsDiv.innerHTML = documentsHtml;
+
+    // Store documents data for expansion
+    window.currentDocuments = data.documents;
+    window.currentDbType = dbType;
+}
+
+// Expand document for detailed exploration
+function expandDocument(index, dbType) {
+    const doc = window.currentDocuments[index];
+    if (!doc) {
+        showToast('Document not found', 'error');
+        return;
+    }
+
+    showDocumentExplorer(doc, dbType);
+}
+
+// Show comprehensive document explorer modal
+function showDocumentExplorer(doc, dbType) {
+    const docId = doc.id || doc._id || 'Unknown';
+
+    const modalHtml = `
+        <div class="modal fade" id="documentExplorerModal" tabindex="-1">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">
+                            <i class="fas fa-search"></i>
+                            Document Explorer: ${docId}
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div class="document-fields-panel">
+                                    <h6 class="mb-3">
+                                        <i class="fas fa-list"></i>
+                                        Document Fields
+                                    </h6>
+                                    <div id="document-fields-tree">
+                                        ${generateFieldsTree(doc)}
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-8">
+                                <div class="document-content-panel">
+                                    <div class="d-flex justify-content-between align-items-center mb-3">
+                                        <h6 class="mb-0">
+                                            <i class="fas fa-eye"></i>
+                                            Field Content
+                                        </h6>
+                                        <div class="btn-group btn-group-sm">
+                                            <button class="btn btn-outline-secondary" onclick="toggleViewMode('formatted')" id="btn-formatted">
+                                                <i class="fas fa-align-left"></i> Formatted
+                                            </button>
+                                            <button class="btn btn-outline-secondary" onclick="toggleViewMode('json')" id="btn-json">
+                                                <i class="fas fa-code"></i> JSON
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div id="document-content-viewer">
+                                        <div class="content-placeholder">
+                                            <i class="fas fa-hand-pointer"></i>
+                                            <p>Select a field from the left panel to view its content</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        <button type="button" class="btn btn-primary" onclick="copyDocumentJSON()">
+                            <i class="fas fa-copy"></i> Copy Full JSON
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if present
+    const existingModal = document.getElementById('documentExplorerModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Add modal to DOM
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Store document data for viewer
+    window.currentExplorerDoc = doc;
+    window.currentViewMode = 'formatted';
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('documentExplorerModal'));
+    modal.show();
+}
+
+// Generate fields tree for document exploration
+function generateFieldsTree(doc, prefix = '', level = 0) {
+    let html = '';
+    const maxLevel = 3; // Prevent infinite recursion
+
+    if (level > maxLevel) {
+        return '<div class="text-muted">... (max depth reached)</div>';
+    }
+
+    for (const [key, value] of Object.entries(doc)) {
+        const fullPath = prefix ? `${prefix}.${key}` : key;
+        const fieldType = getFieldType(value);
+        const fieldIcon = getFieldIcon(fieldType);
+        const hasChildren = fieldType === 'object' || fieldType === 'array';
+
+        html += `
+            <div class="field-item" style="margin-left: ${level * 15}px;">
+                <div class="field-header" onclick="selectField('${fullPath}', '${fieldType}')"
+                     data-path="${fullPath}" data-type="${fieldType}">
+                    ${hasChildren ? `<i class="fas fa-chevron-right field-toggle" onclick="event.stopPropagation(); toggleField('${fullPath}')"></i>` : ''}
+                    <i class="fas ${fieldIcon} field-icon"></i>
+                    <span class="field-name">${key}</span>
+                    <span class="field-type">${fieldType}</span>
+                    ${fieldType === 'array' ? `<span class="field-count">[${value.length}]</span>` : ''}
+                </div>
+                <div class="field-children" id="children-${fullPath.replace(/\./g, '-')}" style="display: none;">
+                    ${hasChildren && level < maxLevel ? generateFieldsTree(
+                        fieldType === 'array' ?
+                            Object.fromEntries(value.slice(0, 5).map((item, i) => [i, item])) :
+                            value,
+                        fullPath,
+                        level + 1
+                    ) : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    return html;
+}
+
+// Get field type for display
+function getFieldType(value) {
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return 'array';
+    if (typeof value === 'object') return 'object';
+    if (typeof value === 'string') return 'string';
+    if (typeof value === 'number') return 'number';
+    if (typeof value === 'boolean') return 'boolean';
+    return 'unknown';
+}
+
+// Get icon for field type
+function getFieldIcon(type) {
+    const icons = {
+        'string': 'fa-quote-right',
+        'number': 'fa-hashtag',
+        'boolean': 'fa-toggle-on',
+        'array': 'fa-list',
+        'object': 'fa-folder',
+        'null': 'fa-ban',
+        'unknown': 'fa-question'
+    };
+    return icons[type] || 'fa-question';
+}
+
+// Toggle field expansion
+function toggleField(path) {
+    const childrenId = `children-${path.replace(/\./g, '-')}`;
+    const childrenDiv = document.getElementById(childrenId);
+    const toggle = document.querySelector(`[data-path="${path}"] .field-toggle`);
+
+    if (childrenDiv && toggle) {
+        if (childrenDiv.style.display === 'none') {
+            childrenDiv.style.display = 'block';
+            toggle.classList.remove('fa-chevron-right');
+            toggle.classList.add('fa-chevron-down');
+        } else {
+            childrenDiv.style.display = 'none';
+            toggle.classList.remove('fa-chevron-down');
+            toggle.classList.add('fa-chevron-right');
+        }
+    }
+}
+
+// Select field for viewing
+function selectField(path, type) {
+    // Remove previous selection
+    document.querySelectorAll('.field-header').forEach(header => {
+        header.classList.remove('selected');
+    });
+
+    // Add selection to current field
+    const fieldHeader = document.querySelector(`[data-path="${path}"]`);
+    if (fieldHeader) {
+        fieldHeader.classList.add('selected');
+    }
+
+    // Get field value
+    const value = getFieldValue(window.currentExplorerDoc, path);
+
+    // Display field content
+    displayFieldContent(path, value, type);
+}
+
+// Get field value by path
+function getFieldValue(obj, path) {
+    return path.split('.').reduce((current, key) => {
+        return current && current[key] !== undefined ? current[key] : null;
+    }, obj);
+}
+
+// Display field content in viewer
+function displayFieldContent(path, value, type) {
+    const viewer = document.getElementById('document-content-viewer');
+    const viewMode = window.currentViewMode || 'formatted';
+
+    let content = '';
+
+    if (viewMode === 'json') {
+        content = `
+            <div class="json-viewer">
+                <div class="field-path-header">
+                    <strong>Path:</strong> ${path}
+                    <span class="badge bg-secondary ms-2">${type}</span>
+                </div>
+                <pre><code class="language-json">${JSON.stringify(value, null, 2)}</code></pre>
+            </div>
+        `;
+    } else {
+        content = `
+            <div class="formatted-viewer">
+                <div class="field-path-header">
+                    <strong>Path:</strong> ${path}
+                    <span class="badge bg-secondary ms-2">${type}</span>
+                </div>
+                <div class="field-content">
+                    ${formatFieldContent(value, type)}
+                </div>
+            </div>
+        `;
+    }
+
+    viewer.innerHTML = content;
+}
+
+// Format field content for display
+function formatFieldContent(value, type) {
+    if (value === null || value === undefined) {
+        return '<span class="text-muted">null</span>';
+    }
+
+    switch (type) {
+        case 'string':
+            return `<div class="string-content">${escapeHtml(value)}</div>`;
+        case 'number':
+            return `<div class="number-content">${value}</div>`;
+        case 'boolean':
+            return `<div class="boolean-content">${value ? 'true' : 'false'}</div>`;
+        case 'array':
+            return `
+                <div class="array-content">
+                    <div class="array-info">Array with ${value.length} items:</div>
+                    <ol class="array-items">
+                        ${value.slice(0, 10).map(item => `
+                            <li>${typeof item === 'object' ? JSON.stringify(item) : escapeHtml(String(item))}</li>
+                        `).join('')}
+                        ${value.length > 10 ? `<li class="text-muted">... and ${value.length - 10} more items</li>` : ''}
+                    </ol>
+                </div>
+            `;
+        case 'object':
+            const keys = Object.keys(value);
+            return `
+                <div class="object-content">
+                    <div class="object-info">Object with ${keys.length} properties:</div>
+                    <ul class="object-properties">
+                        ${keys.slice(0, 10).map(key => `
+                            <li><strong>${key}:</strong> ${typeof value[key] === 'object' ? '[Object]' : escapeHtml(String(value[key]))}</li>
+                        `).join('')}
+                        ${keys.length > 10 ? `<li class="text-muted">... and ${keys.length - 10} more properties</li>` : ''}
+                    </ul>
+                </div>
+            `;
+        default:
+            return `<div class="unknown-content">${escapeHtml(String(value))}</div>`;
+    }
+}
+
+// Toggle view mode between formatted and JSON
+function toggleViewMode(mode) {
+    window.currentViewMode = mode;
+
+    // Update button states
+    document.getElementById('btn-formatted').classList.toggle('active', mode === 'formatted');
+    document.getElementById('btn-json').classList.toggle('active', mode === 'json');
+
+    // Re-display current field if one is selected
+    const selectedField = document.querySelector('.field-header.selected');
+    if (selectedField) {
+        const path = selectedField.getAttribute('data-path');
+        const type = selectedField.getAttribute('data-type');
+        const value = getFieldValue(window.currentExplorerDoc, path);
+        displayFieldContent(path, value, type);
+    }
+}
+
+// Copy full document JSON to clipboard
+function copyDocumentJSON() {
+    const json = JSON.stringify(window.currentExplorerDoc, null, 2);
+    navigator.clipboard.writeText(json).then(() => {
+        showToast('Document JSON copied to clipboard', 'success');
+    }).catch(err => {
+        console.error('Failed to copy JSON:', err);
+        showToast('Failed to copy JSON to clipboard', 'error');
+    });
+}
+
+// Escape HTML for safe display
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Update progress indicator

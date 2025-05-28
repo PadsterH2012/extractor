@@ -32,9 +32,6 @@ anthropic>=0.8.0
 # Standard library enhancements
 pathlib2>=2.3.7; python_version < "3.4"
 
-# Text quality enhancement
-nltk>=3.8.1
-
 # Optional: Enhanced logging and debugging
 colorama>=0.4.6
 rich>=13.0.0

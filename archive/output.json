@@ -4680,12 +4680,12 @@
     "total_pages": 187,
     "total_words": 163070,
     "total_tables": 0,
-    "extraction_timestamp": "2025-05-28T13:46:26.745872",
+    "extraction_timestamp": "2025-05-28T14:19:24.855699",
     "content_type": "novel",
-    "game_type": "Fantasy Novel",
+    "game_type": "Unknown",
     "edition": null,
     "book": "Novel",
-    "collection_name": "fanta_unknown_novel",
+    "collection_name": "unkno_unknown_novel",
     "category_distribution": {
       "Chapter/Section": 78,
       "Dialogue": 109
@@ -4694,25 +4694,25 @@
     "has_isbn": false
   },
   "game_metadata": {
-    "game_type": "Fantasy Novel",
-    "game_full_name": "The Chronicles of Thomas Covenant and Unbeliever",
+    "game_type": "Unknown",
+    "game_full_name": null,
     "edition": null,
     "book_type": "Novel",
-    "book_full_name": "Lord Foul's Bane",
+    "book_full_name": "LORD FOUL'S BANE",
     "publisher": null,
-    "publication_year": "1977",
+    "publication_year": 1977,
     "core_mechanics": [],
     "confidence": 1.0,
-    "reasoning": "The text explicitly states the book title, author, and series title. The content is clearly a work of fiction, not a tabletop RPG rulebook.",
+    "reasoning": "The text clearly states 'LORD FOUL'S BANE By: Stephen R. Donaldson The Chronicles of Thomas Covenant and Unbeliever BOOK ONE C 1977'. The content is narrative prose describing a character's thoughts and actions, consistent with a fantasy novel, not an RPG rulebook. There are no mentions of game mechanics, character sheets, dice rolls, or typical RPG terminology.",
     "detected_categories": [
       "Fantasy",
-      "Fiction"
+      "Novel"
     ],
     "language": "English",
     "detection_method": "ai_analysis",
     "filename": "epdf.pub_donaldson-stephen-r-covenant-01-lord-foul-s-bane.pdf",
-    "collection_prefix": "fanta",
-    "collection_name": "fanta_unknown_novel",
+    "collection_prefix": "unkno",
+    "collection_name": "unkno_unknown_novel",
     "content_type": "novel",
     "extraction_confidence": 75.0,
     "recommended_method": "text",
@@ -4722,7 +4722,7 @@
   },
   "text_quality_metrics": {
     "enabled": false,
-    "message": "Text quality enhancement was not enabled"
+    "message": "Text enhancement disabled for novels (memory optimization)"
   },
-  "extraction_time": "2025-05-28T13:46:26.745932"
+  "extraction_time": "2025-05-28T14:19:24.855747"
 }

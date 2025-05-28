@@ -63,10 +63,18 @@ def calculate_text_quality_metrics(sections):
     enhanced_sections = [s for s in sections if s.get('text_quality_enhanced', False)]
 
     if not enhanced_sections:
-        return {
-            'enabled': False,
-            'message': 'Text quality enhancement was not enabled'
-        }
+        # Check if this is novel content (text enhancement disabled for memory optimization)
+        is_novel = any(s.get('content_type') == 'novel' for s in sections)
+        if is_novel:
+            return {
+                'enabled': False,
+                'message': 'Text enhancement disabled for novels (memory optimization)'
+            }
+        else:
+            return {
+                'enabled': False,
+                'message': 'Text quality enhancement was not enabled'
+            }
 
     # Aggregate metrics
     total_sections = len(enhanced_sections)
@@ -481,12 +489,35 @@ def extract_pdf():
             'aggressive_cleanup': aggressive_cleanup
         }
 
-        # CRITICAL: Pass the model from analysis to extraction
+        # DEBUG: Log the analysis data
+        logger.info(f"🔧 EXTRACTION DEBUG - Analysis data:")
+        logger.info(f"   ai_provider: {analysis.get('ai_provider')}")
+        logger.info(f"   ai_model: {analysis.get('ai_model')}")
+        logger.info(f"   analysis keys: {list(analysis.keys())}")
+
+        # CRITICAL: Pass the model and API configuration from analysis to extraction
         if 'ai_model' in analysis:
             ai_config['model'] = analysis['ai_model']
             logger.info(f"🔧 Using model from analysis: {analysis['ai_model']}")
         elif analysis['ai_provider'] == 'openrouter':
             logger.warning(f"🔧 No model found for OpenRouter in analysis session!")
+
+        # Pass API key for OpenRouter
+        if analysis['ai_provider'] == 'openrouter':
+            import os
+            api_key = os.getenv('OPENROUTER_API_KEY')
+            if api_key:
+                ai_config['api_key'] = api_key
+                logger.info(f"🔧 OpenRouter API key configured for extraction")
+            else:
+                logger.warning(f"🔧 OpenRouter API key not found - extraction will use mock client")
+
+        # DEBUG: Log the final AI config
+        logger.info(f"🔧 EXTRACTION DEBUG - Final AI config:")
+        logger.info(f"   provider: {ai_config.get('provider')}")
+        logger.info(f"   model: {ai_config.get('model')}")
+        logger.info(f"   api_key: {'***SET***' if ai_config.get('api_key') else 'NOT SET'}")
+        logger.info(f"   config keys: {list(ai_config.keys())}")
 
         processor = MultiGamePDFProcessor(debug=True, ai_config=ai_config)
 
@@ -587,11 +618,19 @@ def import_to_chroma():
         manager = MultiGameCollectionManager()
 
         # Create hierarchical collection path: {content_type}.{game_type}.{edition}.{book_type}.{collection_name}
-        content_type = game_metadata.get('content_type', 'source_material')
-        game_type = game_metadata.get('game_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
-        edition = game_metadata.get('edition', 'unknown').lower().replace(' ', '_').replace('&', 'and')
-        book_type = game_metadata.get('book_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
-        collection_base = game_metadata.get('collection_name', 'unknown')
+        content_type = game_metadata.get('content_type', 'source_material') or 'source_material'
+
+        # Safe string handling with None checks
+        game_type = game_metadata.get('game_type') or 'unknown'
+        game_type = str(game_type).lower().replace(' ', '_').replace('&', 'and')
+
+        edition = game_metadata.get('edition') or 'unknown'
+        edition = str(edition).lower().replace(' ', '_').replace('&', 'and')
+
+        book_type = game_metadata.get('book_type') or 'unknown'
+        book_type = str(book_type).lower().replace(' ', '_').replace('&', 'and')
+
+        collection_base = game_metadata.get('collection_name') or 'unknown'
 
         collection_name = f"{content_type}.{game_type}.{edition}.{book_type}.{collection_base}"
         logger.info(f"Importing to ChromaDB collection: {collection_name}")
@@ -650,6 +689,14 @@ def import_to_mongodb():
         # Apply any metadata overrides
         game_metadata.update(metadata_overrides)
 
+        # Debug: Log metadata values to identify None issues
+        logger.info(f"🔧 MongoDB import metadata debug:")
+        logger.info(f"   game_type: {repr(game_metadata.get('game_type'))}")
+        logger.info(f"   edition: {repr(game_metadata.get('edition'))}")
+        logger.info(f"   book_type: {repr(game_metadata.get('book_type'))}")
+        logger.info(f"   collection_name: {repr(game_metadata.get('collection_name'))}")
+        logger.info(f"   content_type: {repr(game_metadata.get('content_type'))}")
+
         # Initialize MongoDB manager
         mongodb_manager = MongoDBManager()
 
@@ -667,11 +714,19 @@ def import_to_mongodb():
 
         if use_hierarchical_collections:
             # Create hierarchical collection path: rpger.source_material.{game_type}.{edition}.{book_type}.{collection_name}
-            content_type = game_metadata.get('content_type', 'source_material')
-            game_type = game_metadata.get('game_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
-            edition = game_metadata.get('edition', 'unknown').lower().replace(' ', '_').replace('&', 'and')
-            book_type = game_metadata.get('book_type', 'unknown').lower().replace(' ', '_').replace('&', 'and')
-            collection_base = game_metadata.get('collection_name', 'unknown')
+            content_type = game_metadata.get('content_type', 'source_material') or 'source_material'
+
+            # Safe string handling with None checks
+            game_type = game_metadata.get('game_type') or 'unknown'
+            game_type = str(game_type).lower().replace(' ', '_').replace('&', 'and')
+
+            edition = game_metadata.get('edition') or 'unknown'
+            edition = str(edition).lower().replace(' ', '_').replace('&', 'and')
+
+            book_type = game_metadata.get('book_type') or 'unknown'
+            book_type = str(book_type).lower().replace(' ', '_').replace('&', 'and')
+
+            collection_base = game_metadata.get('collection_name') or 'unknown'
 
             collection_name = f"{content_type}.{game_type}.{edition}.{book_type}.{collection_base}"
         else:

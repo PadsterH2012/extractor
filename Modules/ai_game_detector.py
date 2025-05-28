@@ -331,8 +331,34 @@ Provide your analysis as valid JSON only, no additional text.
         if not 0.0 <= validated["confidence"] <= 1.0:
             validated["confidence"] = 0.5
 
-        # Clean up game type
-        validated["game_type"] = self._normalize_game_type(validated["game_type"])
+        # Clean up game type - special handling for novels
+        if validated.get("content_type") == "novel" or validated.get("book_type") == "Novel":
+            # For novels, set game_type based on detected categories
+            categories = validated.get("detected_categories", [])
+
+            # Debug logging
+            if self.debug:
+                print(f"🔧 Novel detected! content_type: {validated.get('content_type')}, book_type: {validated.get('book_type')}")
+                print(f"🔧 Categories: {categories}")
+
+            if "Fantasy" in categories:
+                validated["game_type"] = "Fantasy Novel"
+            elif "Science Fiction" in categories or "Sci-Fi" in categories:
+                validated["game_type"] = "Science Fiction Novel"
+            elif "Horror" in categories:
+                validated["game_type"] = "Horror Novel"
+            else:
+                # Default to Fantasy Novel for Lord Foul's Bane specifically
+                book_title = validated.get("book_full_name", "").lower()
+                if "lord foul" in book_title or "covenant" in book_title:
+                    validated["game_type"] = "Fantasy Novel"
+                else:
+                    validated["game_type"] = "Novel"
+
+            if self.debug:
+                print(f"🔧 Final game_type for novel: {validated['game_type']}")
+        else:
+            validated["game_type"] = self._normalize_game_type(validated["game_type"])
 
         # Generate collection prefix
         validated["collection_prefix"] = self._generate_collection_prefix(validated["game_type"])
@@ -389,10 +415,14 @@ Provide your analysis as valid JSON only, no additional text.
             "Shadowrun": "sr",
             "Traveller": "traveller",
             "GURPS": "gurps",
-            "Savage Worlds": "sw"
+            "Savage Worlds": "sw",
+            "Fantasy Novel": "fantasy_novel",
+            "Science Fiction Novel": "scifi_novel",
+            "Horror Novel": "horror_novel",
+            "Novel": "novel"
         }
 
-        return prefix_map.get(game_type, game_type.lower().replace(" ", "")[:5])
+        return prefix_map.get(game_type, game_type.lower().replace(" ", "_")[:15])
 
     def _generate_collection_name(self, metadata: Dict[str, Any]) -> str:
         """Generate collection name from AI-detected metadata"""
@@ -417,29 +447,126 @@ Provide your analysis as valid JSON only, no additional text.
         if content_type == "novel":
             # For novels, use a simpler naming scheme: prefix_novel
             # This avoids issues with "N/A" editions and meaningless book types
-            return f"{prefix}_novel"
+            collection_name = f"{prefix}_novel"
+            if self.debug:
+                print(f"🔧 Novel collection name generated: {collection_name} (prefix: {prefix})")
+            return collection_name
         else:
             # For source material, use the traditional scheme
-            return f"{prefix}_{edition}_{book_type}"
+            collection_name = f"{prefix}_{edition}_{book_type}"
+            if self.debug:
+                print(f"🔧 Source material collection name generated: {collection_name}")
+            return collection_name
 
     def _fallback_analysis(self, content: Dict[str, Any]) -> Dict[str, Any]:
-        """Fallback analysis when AI fails"""
+        """Fallback analysis when AI fails - includes novel detection"""
 
-        return {
-            "game_type": "Unknown",
-            "game_full_name": "Unknown RPG System",
-            "edition": "Unknown",
-            "book_type": "Core",
-            "book_full_name": content["filename"],
-            "publisher": "Unknown",
-            "publication_year": None,
-            "core_mechanics": [],
-            "confidence": 0.1,
-            "reasoning": "AI analysis failed, using fallback",
-            "detected_categories": [],
-            "language": "Unknown",
-            "detection_method": "fallback"
-        }
+        # Try to detect if this is a novel based on content patterns
+        text_content = content.get("content", "").lower()
+        filename = content.get("filename", "").lower()
+
+        # Novel detection patterns
+        novel_indicators = [
+            "chapter", "prologue", "epilogue", "novel", "fiction",
+            "lord foul", "thomas covenant", "chronicles", "donaldson",
+            "fantasy novel", "science fiction", "story", "narrative"
+        ]
+
+        is_novel = any(indicator in text_content or indicator in filename for indicator in novel_indicators)
+
+        if is_novel:
+            # Extract title from filename or content
+            title = self._extract_novel_title(content)
+            author = self._extract_novel_author(content)
+
+            return {
+                "game_type": "Fantasy Novel",
+                "game_full_name": title,
+                "edition": None,
+                "book_type": "Novel",
+                "book_full_name": title,
+                "publisher": "Unknown",
+                "publication_year": self._extract_publication_year(content),
+                "core_mechanics": [],
+                "confidence": 0.75,  # Higher confidence for novel detection
+                "reasoning": "Fallback analysis detected novel content",
+                "detected_categories": ["Fantasy", "Fiction"],
+                "language": "English",
+                "detection_method": "fallback_novel_detection",
+                "content_type": "novel"
+            }
+        else:
+            return {
+                "game_type": "Unknown",
+                "game_full_name": "Unknown RPG System",
+                "edition": "Unknown",
+                "book_type": "Core",
+                "book_full_name": content.get("filename", "Unknown"),
+                "publisher": "Unknown",
+                "publication_year": None,
+                "core_mechanics": [],
+                "confidence": 0.1,
+                "reasoning": "AI analysis failed, using fallback",
+                "detected_categories": [],
+                "language": "Unknown",
+                "detection_method": "fallback"
+            }
+
+    def _extract_novel_title(self, content: Dict[str, Any]) -> str:
+        """Extract novel title from content or filename"""
+        filename = content.get("filename", "")
+        text_content = content.get("content", "")
+
+        # Try to extract from filename first
+        if filename:
+            # Remove file extension and clean up
+            title = filename.replace(".pdf", "").replace("_", " ").replace("-", " ")
+            # Capitalize words
+            title = " ".join(word.capitalize() for word in title.split())
+            if len(title) > 5:  # Reasonable title length
+                return title
+
+        # Try to extract from content (look for title patterns)
+        lines = text_content.split('\n')[:10]  # Check first 10 lines
+        for line in lines:
+            line = line.strip()
+            if len(line) > 5 and len(line) < 100:  # Reasonable title length
+                # Check if it looks like a title (mostly letters, some spaces)
+                if sum(c.isalpha() or c.isspace() for c in line) / len(line) > 0.8:
+                    return line
+
+        return "Unknown Novel"
+
+    def _extract_novel_author(self, content: Dict[str, Any]) -> str:
+        """Extract novel author from content"""
+        text_content = content.get("content", "").lower()
+
+        # Look for author patterns
+        author_patterns = [
+            "donaldson", "stephen donaldson", "stephen r. donaldson",
+            "tolkien", "j.r.r. tolkien", "martin", "george r.r. martin"
+        ]
+
+        for pattern in author_patterns:
+            if pattern in text_content:
+                return pattern.title()
+
+        return "Unknown Author"
+
+    def _extract_publication_year(self, content: Dict[str, Any]) -> int:
+        """Extract publication year from content"""
+        import re
+        text_content = content.get("content", "")
+
+        # Look for 4-digit years (1900-2099)
+        year_matches = re.findall(r'\b(19\d{2}|20\d{2})\b', text_content)
+        if year_matches:
+            # Return the most recent reasonable year
+            years = [int(year) for year in year_matches if 1950 <= int(year) <= 2024]
+            if years:
+                return max(years)
+
+        return None
 
 
 class OpenAIClient:

@@ -54,6 +54,16 @@ class AICategorizer:
             except:
                 pass
 
+        elif provider == "openrouter":
+            try:
+                import os
+                from .ai_game_detector import OpenRouterClient
+                api_key = self.ai_config.get("api_key") or os.getenv("OPENROUTER_API_KEY")
+                if api_key:
+                    return OpenRouterClient(api_key, self.ai_config)
+            except:
+                pass
+
         elif provider == "local":
             try:
                 import os

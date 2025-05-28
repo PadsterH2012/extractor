@@ -15,6 +15,7 @@ import os
 import re
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+from .building_blocks_manager import BuildingBlocksManager
 
 
 class NovelElementExtractor:
@@ -195,6 +196,10 @@ class NovelElementExtractor:
         self.logger.info("🧱 Step 4: Extracting simple building blocks")
         building_blocks = self._extract_simple_building_blocks(combined_text, metadata)
 
+        # Step 6: Store building blocks in separate collection
+        self.logger.info("💾 Step 5: Storing building blocks in dedicated collection")
+        building_blocks_storage_result = self._store_building_blocks_separately(building_blocks, metadata)
+
         # Compile final results with characters and building blocks
         final_result = {
             "characters": final_characters,
@@ -215,7 +220,8 @@ class NovelElementExtractor:
                 "building_block_extraction": {
                     "total_blocks_extracted": sum(len(blocks) for blocks in building_blocks.values() if isinstance(blocks, list)),
                     "block_categories": len(building_blocks.keys())
-                }
+                },
+                "building_blocks_storage": building_blocks_storage_result
             },
             "metadata": {
                 "novel_title": metadata.get("book_title", "Unknown"),
@@ -1290,6 +1296,47 @@ BE THOROUGH: Find all named characters in this chunk, even minor ones.
             })
 
         return final_characters
+
+    def _store_building_blocks_separately(self, building_blocks: Dict[str, Any], metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Store building blocks in a separate MongoDB collection for procedural generation"""
+
+        try:
+            # Initialize building blocks manager
+            blocks_manager = BuildingBlocksManager()
+
+            # Prepare source metadata for storage
+            source_metadata = {
+                "book_title": metadata.get("book_title", "Unknown Novel"),
+                "author": metadata.get("author", "Unknown Author"),
+                "filename": metadata.get("filename", ""),
+                "extraction_id": metadata.get("extraction_id", None),
+                "content_type": "novel"
+            }
+
+            # Store building blocks in dedicated collection
+            storage_result = blocks_manager.store_building_blocks(building_blocks, source_metadata)
+
+            self.logger.info(f"✅ Building blocks stored successfully: {storage_result['blocks_stored']} blocks in {storage_result['collection']}")
+
+            return {
+                "success": True,
+                "blocks_stored": storage_result["blocks_stored"],
+                "blocks_skipped": storage_result["blocks_skipped"],
+                "categories": storage_result["categories"],
+                "collection": storage_result["collection"],
+                "novel_title": storage_result["novel_title"]
+            }
+
+        except Exception as e:
+            self.logger.error(f"❌ Failed to store building blocks separately: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "blocks_stored": 0,
+                "blocks_skipped": 0,
+                "categories": [],
+                "collection": None
+            }
 
     def _extract_simple_building_blocks(self, text: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Extract simple building blocks for procedural generation"""

@@ -607,10 +607,16 @@ class MultiGamePDFProcessor:
         # Special handling for novels - they don't have meaningful editions
         if content_type == "novel":
             # For novels, use a simpler naming scheme: prefix_novel
-            return f"{prefix}_novel"
+            collection_name = f"{prefix}_novel"
+            if self.debug:
+                print(f"🔧 PDF Processor novel collection name: {collection_name} (prefix: {prefix})")
+            return collection_name
         else:
             # For source material, use the traditional scheme
-            return f"{prefix}_{edition}_{book}"
+            collection_name = f"{prefix}_{edition}_{book}"
+            if self.debug:
+                print(f"🔧 PDF Processor source material collection name: {collection_name}")
+            return collection_name
 
     def _detect_multi_column_layout(self, blocks: Dict, page_width: float) -> bool:
         """Detect multi-column layout"""

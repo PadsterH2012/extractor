@@ -124,13 +124,25 @@ class MultiGamePDFProcessor:
             self.logger.info("🧠 Memory optimization: Disabled text enhancement for novel processing")
 
             try:
-                extracted_sections = self._extract_novel_content(doc, game_metadata)
+                # Extract novel content in narrative-focused format
+                novel_data = self._extract_novel_content(doc, game_metadata)
 
                 # For novels, perform character identification after content extraction
-                character_results = self._identify_novel_characters(extracted_sections, game_metadata)
+                character_results = self._identify_novel_characters(novel_data['raw_sections'], game_metadata)
 
-                # Add character information to metadata for future pattern extraction
-                game_metadata['character_identification'] = character_results
+                # Add character information to novel data structure
+                novel_data['character_identification'] = character_results
+
+                # Convert to sections format for compatibility with existing pipeline
+                extracted_sections = novel_data['raw_sections']
+
+                # Store novel-specific data in metadata for MongoDB
+                game_metadata['novel_data'] = {
+                    'narrative_structure': novel_data['narrative_structure'],
+                    'extraction_metadata': novel_data['extraction_metadata'],
+                    'character_identification': character_results
+                }
+
             finally:
                 # Restore original text enhancement setting
                 self.enable_text_enhancement = original_text_enhancement
@@ -249,12 +261,14 @@ class MultiGamePDFProcessor:
 
         return sections
 
-    def _extract_novel_content(self, doc, game_metadata: Dict[str, str]) -> List[Dict[str, Any]]:
+    def _extract_novel_content(self, doc, game_metadata: Dict[str, str]) -> Dict[str, Any]:
         """Extract content from novels with narrative-focused processing"""
         self.logger.info("🔖 Processing novel content with narrative extraction")
 
-        sections = []
+        raw_sections = []
         total_tables = 0
+        total_text = ""
+        chapters_detected = []
 
         for page_num in range(len(doc)):
             self.logger.debug(f"Processing novel page {page_num + 1}/{len(doc)}")
@@ -272,7 +286,6 @@ class MultiGamePDFProcessor:
                     text = self._process_multi_column_text(blocks, page.rect.width)
 
                 # Apply text quality enhancement if enabled
-                original_text = text
                 text_quality_result = None
                 if self.enable_text_enhancement and text.strip():
                     text_quality_result = self.text_enhancer.enhance_text_quality(
@@ -289,6 +302,14 @@ class MultiGamePDFProcessor:
                 # Generate title from first line or chapter detection
                 first_line = text.split('\n')[0].strip()[:100]
                 title = self._detect_novel_section_title(text, first_line, page_num)
+
+                # Track chapter detection for narrative structure
+                if any(marker in title.lower() for marker in ['chapter', 'part', 'book', 'prologue', 'epilogue']):
+                    chapters_detected.append({
+                        "title": title,
+                        "page": page_num + 1,
+                        "word_count": len(text.split())
+                    })
 
                 # Novel-specific categorization (different from RPG source material)
                 category = self._categorize_novel_content(text, game_metadata)
@@ -323,10 +344,43 @@ class MultiGamePDFProcessor:
                 else:
                     section["text_quality_enhanced"] = False
 
-                sections.append(section)
+                raw_sections.append(section)
+                total_text += text + "\n\n"
 
-        self.logger.info(f"📖 Novel extraction complete: {len(sections)} sections, {total_tables} tables")
-        return sections
+        # Build novel-specific data structure
+        novel_data = {
+            "content_type": "novel",
+            "raw_sections": raw_sections,  # Keep for character identification compatibility
+            "narrative_structure": {
+                "total_pages": len(raw_sections),
+                "total_words": len(total_text.split()),
+                "total_characters": len(total_text),
+                "chapters_detected": len(chapters_detected),
+                "chapter_list": chapters_detected,
+                "estimated_reading_time": len(total_text.split()) // 250,  # ~250 words per minute
+                "narrative_flow": "continuous",
+                "has_dialogue": any(section.get("narrative_elements", {}).get("has_dialogue", False) for section in raw_sections),
+                "has_action": any(section.get("narrative_elements", {}).get("has_action", False) for section in raw_sections),
+                "has_description": any(section.get("narrative_elements", {}).get("has_description", False) for section in raw_sections)
+            },
+            "extraction_metadata": {
+                "title": game_metadata.get("book_title", "Unknown Novel"),
+                "author": game_metadata.get("author", "Unknown Author"),
+                "isbn": game_metadata.get("isbn", None),
+                "extraction_date": self._get_current_timestamp(),
+                "extraction_method": "novel_narrative_extraction",
+                "total_tables": total_tables
+            }
+        }
+
+        self.logger.info(f"📖 Novel extraction complete: {len(raw_sections)} sections, {total_tables} tables")
+        self.logger.info(f"📚 Novel structure: {len(chapters_detected)} chapters, {len(total_text.split()):,} words")
+
+        return novel_data
+
+    def _get_current_timestamp(self) -> str:
+        """Get current timestamp in ISO format"""
+        return datetime.now().isoformat()
 
     def _detect_novel_section_title(self, text: str, first_line: str, page_num: int) -> str:
         """Detect section titles in novels (chapters, parts, etc.)"""
@@ -394,31 +448,31 @@ class MultiGamePDFProcessor:
         """Identify characters in novel content using two-pass AI analysis with progress updates"""
 
         try:
-            # Import character identifier
-            from .novel_character_identifier import NovelCharacterIdentifier
+            # Import novel element extractor
+            from .novel_element_extractor import NovelElementExtractor
 
             # Get AI configuration from the processor's config
             ai_config = getattr(self, 'ai_config', {"provider": "mock"})
 
-            # Initialize character identifier
-            character_identifier = NovelCharacterIdentifier(ai_config=ai_config, debug=self.debug)
+            # Initialize novel element extractor
+            element_extractor = NovelElementExtractor(ai_config=ai_config, debug=self.debug)
 
             # Add progress callback for real-time updates
-            character_identifier.progress_callback = self._character_progress_callback
+            element_extractor.progress_callback = self._character_progress_callback
 
-            # Perform character identification
-            self.logger.info("🎭 Starting character identification for novel")
-            character_results = character_identifier.identify_characters(sections, game_metadata)
+            # Perform novel element extraction (characters + locations)
+            self.logger.info("🎭 Starting novel element extraction")
+            extraction_results = element_extractor.identify_characters(sections, game_metadata)
 
             # Log results
-            total_characters = character_results.get('total_characters', 0)
-            self.logger.info(f"🎭 Character identification complete: {total_characters} characters identified")
+            total_characters = extraction_results.get('total_characters', 0)
+            self.logger.info(f"🎭 Novel element extraction complete: {total_characters} characters identified")
 
             if self.debug and total_characters > 0:
-                character_names = [char['name'] for char in character_results.get('characters', [])]
+                character_names = [char['name'] for char in extraction_results.get('characters', [])]
                 print(f"📝 Characters found: {', '.join(character_names)}")
 
-            return character_results
+            return extraction_results
 
         except Exception as e:
             self.logger.error(f"Character identification failed: {e}")
@@ -471,7 +525,14 @@ class MultiGamePDFProcessor:
                 total = details.get('candidates_to_analyze', 0)
                 confirmed = details.get('characters_confirmed', 0)
                 character = details.get('current_character', 'Unknown')
-                self.logger.info(f"🎯 Analysis: {analyzed}/{total} - {confirmed} confirmed - Current: {character}")
+
+                # Handle batch processing information
+                if 'batch_number' in details:
+                    batch_num = details.get('batch_number', 0)
+                    batch_size = details.get('batch_size', 0)
+                    self.logger.info(f"🎯 Batch Analysis: Batch {batch_num} ({batch_size} characters) - {confirmed} confirmed total")
+                else:
+                    self.logger.info(f"🎯 Analysis: {analyzed}/{total} - {confirmed} confirmed - Current: {character}")
 
         # If debug mode, also print to console for immediate feedback
         if self.debug:
@@ -480,9 +541,18 @@ class MultiGamePDFProcessor:
             elif stage == 'filtering' and status == 'completed':
                 print(f"🔍 Filtering complete: {details.get('candidates_filtered', 0)} candidates passed")
             elif stage == 'analysis' and 'current_character' in details:
-                print(f"🎯 Analyzing: {details.get('current_character', 'Unknown')}")
+                if 'batch_number' in details:
+                    batch_num = details.get('batch_number', 0)
+                    batch_size = details.get('batch_size', 0)
+                    print(f"🎯 Batch {batch_num}: Analyzing {batch_size} characters together")
+                else:
+                    print(f"🎯 Analyzing: {details.get('current_character', 'Unknown')}")
             elif status == 'completed':
-                print(f"✅ {stage.title()} stage completed")
+                if stage == 'analysis' and 'total_batches' in details:
+                    total_batches = details.get('total_batches', 0)
+                    print(f"✅ Batch analysis completed: {total_batches} batches processed")
+                else:
+                    print(f"✅ {stage.title()} stage completed")
 
     def _create_forced_metadata(self, pdf_path: Path, force_game_type: Optional[str],
                                force_edition: Optional[str]) -> Dict[str, Any]:
@@ -1020,7 +1090,7 @@ class MultiGamePDFProcessor:
         return summary
 
     def save_extraction(self, extraction_data: Dict, output_dir: Path) -> Dict[str, Path]:
-        """Save extraction in multiple formats"""
+        """Save extraction in multiple formats with novel-specific handling"""
 
         output_dir.mkdir(parents=True, exist_ok=True)
         metadata = extraction_data["metadata"]
@@ -1028,28 +1098,135 @@ class MultiGamePDFProcessor:
         # Generate base filename from collection name
         base_name = metadata["collection_name"]
 
-        # Save ChromaDB-ready JSON
-        chromadb_data = self._prepare_chromadb_format(extraction_data)
-        chromadb_file = output_dir / f"{base_name}_chromadb.json"
+        # Check if this is novel content
+        is_novel = metadata.get("content_type") == "novel"
 
-        with open(chromadb_file, 'w', encoding='utf-8') as f:
-            json.dump(chromadb_data, f, indent=2, ensure_ascii=False)
+        if is_novel:
+            # For novels, save novel-specific MongoDB format
+            novel_mongodb_data = self._prepare_novel_mongodb_format(extraction_data)
+            mongodb_file = output_dir / f"{base_name}_novel_mongodb.json"
 
-        # Save raw extraction data
-        raw_file = output_dir / f"{base_name}_raw.json"
-        with open(raw_file, 'w', encoding='utf-8') as f:
-            json.dump(extraction_data, f, indent=2, ensure_ascii=False)
+            with open(mongodb_file, 'w', encoding='utf-8') as f:
+                json.dump(novel_mongodb_data, f, indent=2, ensure_ascii=False)
 
-        # Save summary
-        summary_file = output_dir / f"{base_name}_summary.json"
-        with open(summary_file, 'w', encoding='utf-8') as f:
-            json.dump(extraction_data["extraction_summary"], f, indent=2, ensure_ascii=False)
+            # Save ChromaDB format (still useful for semantic search)
+            chromadb_data = self._prepare_chromadb_format(extraction_data)
+            chromadb_file = output_dir / f"{base_name}_chromadb.json"
 
-        return {
-            "chromadb": chromadb_file,
-            "raw": raw_file,
-            "summary": summary_file
+            with open(chromadb_file, 'w', encoding='utf-8') as f:
+                json.dump(chromadb_data, f, indent=2, ensure_ascii=False)
+
+            # Save raw extraction data
+            raw_file = output_dir / f"{base_name}_raw.json"
+            with open(raw_file, 'w', encoding='utf-8') as f:
+                json.dump(extraction_data, f, indent=2, ensure_ascii=False)
+
+            # Save summary
+            summary_file = output_dir / f"{base_name}_summary.json"
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(extraction_data["extraction_summary"], f, indent=2, ensure_ascii=False)
+
+            return {
+                "mongodb": mongodb_file,  # Novel-specific MongoDB format
+                "chromadb": chromadb_file,
+                "raw": raw_file,
+                "summary": summary_file
+            }
+
+        else:
+            # Standard RPG source material processing
+            # Save ChromaDB-ready JSON
+            chromadb_data = self._prepare_chromadb_format(extraction_data)
+            chromadb_file = output_dir / f"{base_name}_chromadb.json"
+
+            with open(chromadb_file, 'w', encoding='utf-8') as f:
+                json.dump(chromadb_data, f, indent=2, ensure_ascii=False)
+
+            # Save raw extraction data
+            raw_file = output_dir / f"{base_name}_raw.json"
+            with open(raw_file, 'w', encoding='utf-8') as f:
+                json.dump(extraction_data, f, indent=2, ensure_ascii=False)
+
+            # Save summary
+            summary_file = output_dir / f"{base_name}_summary.json"
+            with open(summary_file, 'w', encoding='utf-8') as f:
+                json.dump(extraction_data["extraction_summary"], f, indent=2, ensure_ascii=False)
+
+            return {
+                "chromadb": chromadb_file,
+                "raw": raw_file,
+                "summary": summary_file
+            }
+
+    def _prepare_novel_mongodb_format(self, extraction_data: Dict) -> Dict[str, Any]:
+        """Prepare novel data in MongoDB format - completely different from RPG source material"""
+
+        metadata = extraction_data["metadata"]
+        novel_data = metadata.get("novel_data", {})
+
+        # Create novel-specific MongoDB document
+        novel_document = {
+            "_id": f"novel_{metadata['collection_name']}",
+            "content_type": "novel",
+
+            # Basic novel information
+            "title": novel_data.get("extraction_metadata", {}).get("title", "Unknown Novel"),
+            "author": novel_data.get("extraction_metadata", {}).get("author", "Unknown Author"),
+            "isbn": metadata.get("isbn") or metadata.get("isbn_13") or metadata.get("isbn_10"),
+
+            # Narrative structure (what makes novels different from RPG books)
+            "narrative_structure": novel_data.get("narrative_structure", {}),
+
+            # Character information (the main value from novels)
+            "characters": novel_data.get("character_identification", {}).get("characters", []),
+            "character_count": len(novel_data.get("character_identification", {}).get("characters", [])),
+
+            # Processing metadata
+            "extraction_metadata": {
+                "extraction_date": novel_data.get("extraction_metadata", {}).get("extraction_date"),
+                "extraction_method": "novel_narrative_extraction",
+                "processing_stages": novel_data.get("character_identification", {}).get("processing_stages", {}),
+                "total_pages": novel_data.get("narrative_structure", {}).get("total_pages", 0),
+                "total_words": novel_data.get("narrative_structure", {}).get("total_words", 0),
+                "chapters_detected": novel_data.get("narrative_structure", {}).get("chapters_detected", 0),
+                "estimated_reading_time": novel_data.get("narrative_structure", {}).get("estimated_reading_time", 0)
+            },
+
+            # Source file information
+            "source_file": {
+                "filename": metadata.get("source_file", "unknown.pdf"),
+                "file_size": metadata.get("file_size", 0),
+                "collection_name": metadata.get("collection_name"),
+                "game_type": metadata.get("game_type"),  # For organization
+                "edition": metadata.get("edition")
+            },
+
+            # Novel-specific tags for organization
+            "tags": [
+                "novel",
+                "character_extraction",
+                metadata.get("game_type", "").lower(),
+                metadata.get("edition", "").lower()
+            ],
+
+            # Future pattern extraction placeholder
+            "pattern_extraction": {
+                "status": "not_implemented",
+                "planned_patterns": [
+                    "physical_descriptions",
+                    "dialogue_patterns",
+                    "personality_traits",
+                    "behavior_patterns",
+                    "voice_characteristics"
+                ]
+            },
+
+            # Timestamps
+            "created_at": self._get_current_timestamp(),
+            "updated_at": self._get_current_timestamp()
         }
+
+        return novel_document
 
     def _prepare_chromadb_format(self, extraction_data: Dict) -> List[Dict]:
         """Prepare data in ChromaDB format"""

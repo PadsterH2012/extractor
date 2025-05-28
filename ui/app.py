@@ -39,6 +39,21 @@ logger = logging.getLogger(__name__)
 # Global variables for session state
 analysis_results = {}
 extraction_results = {}
+# Global storage for progress tracking
+progress_tracking = {}
+
+def progress_callback(session_id, stage, status, details=None):
+    """Store progress updates for real-time tracking"""
+    if session_id not in progress_tracking:
+        progress_tracking[session_id] = {}
+
+    progress_tracking[session_id][stage] = {
+        'status': status,
+        'details': details or {},
+        'timestamp': datetime.now().isoformat()
+    }
+
+    logger.info(f"Progress update - Session: {session_id[:8]}, Stage: {stage}, Status: {status}")
 
 def calculate_text_quality_metrics(sections):
     """Calculate aggregated text quality metrics from sections"""
@@ -319,6 +334,9 @@ def analyze_pdf():
         # Add model selection for OpenRouter
         if ai_model and ai_provider == 'openrouter':
             ai_config['model'] = ai_model
+            logger.info(f"🔧 Analysis using OpenRouter model: {ai_model}")
+        elif ai_provider == 'openrouter':
+            logger.warning(f"🔧 OpenRouter selected but no model provided!")
 
         detector = AIGameDetector(ai_config)
 
@@ -373,6 +391,7 @@ def analyze_pdf():
             'filename': os.path.basename(filepath),
             'game_metadata': game_metadata,
             'ai_provider': ai_provider,
+            'ai_model': ai_model,  # Store the model for extraction phase
             'content_type': content_type,
             'analysis_time': datetime.now().isoformat(),
             'extracted_text': extracted_content.get('combined_text', ''),  # Store extracted text for copy functionality
@@ -412,6 +431,30 @@ def get_extracted_text(session_id):
         logger.error(f"Error retrieving extracted text: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/progress/<session_id>', methods=['GET'])
+def get_progress(session_id):
+    """Get real-time progress updates for a session"""
+    try:
+        logger.info(f"🔧 Progress request for session: {session_id}")
+        logger.info(f"🔧 Available sessions: {list(progress_tracking.keys())}")
+
+        if session_id not in progress_tracking:
+            logger.warning(f"🔧 Session {session_id} not found in progress tracking")
+            return jsonify({'error': 'Session not found', 'available_sessions': list(progress_tracking.keys())}), 404
+
+        progress_data = progress_tracking[session_id]
+        logger.info(f"🔧 Returning progress data: {progress_data}")
+
+        return jsonify({
+            'success': True,
+            'progress': progress_data,
+            'session_id': session_id
+        })
+
+    except Exception as e:
+        logger.error(f"Error retrieving progress: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/extract', methods=['POST'])
 def extract_pdf():
     """Extract content from analyzed PDF"""
@@ -430,7 +473,7 @@ def extract_pdf():
         enable_text_enhancement = data.get('enable_text_enhancement', True)
         aggressive_cleanup = data.get('aggressive_cleanup', False)
 
-        # Initialize PDF processor
+        # Initialize PDF processor with progress callback
         ai_config = {
             'provider': analysis['ai_provider'],
             'debug': True,
@@ -438,7 +481,27 @@ def extract_pdf():
             'aggressive_cleanup': aggressive_cleanup
         }
 
+        # CRITICAL: Pass the model from analysis to extraction
+        if 'ai_model' in analysis:
+            ai_config['model'] = analysis['ai_model']
+            logger.info(f"🔧 Using model from analysis: {analysis['ai_model']}")
+        elif analysis['ai_provider'] == 'openrouter':
+            logger.warning(f"🔧 No model found for OpenRouter in analysis session!")
+
         processor = MultiGamePDFProcessor(debug=True, ai_config=ai_config)
+
+        # Set up progress tracking for this session
+        progress_tracking[session_id] = {}
+        logger.info(f"🔧 Progress tracking initialized for session: {session_id}")
+
+        # Create a progress callback function for this session
+        def session_progress_callback(stage, status, details=None):
+            logger.info(f"🔧 Progress callback: {session_id[:8]} - {stage} - {status}")
+            progress_callback(session_id, stage, status, details)
+
+        # Override the processor's progress callback to use our session tracking
+        processor._character_progress_callback = session_progress_callback
+        logger.info(f"🔧 Progress callback attached to processor")
 
         # Get content type
         content_type = analysis.get('content_type') or game_metadata.get('content_type', 'source_material')
@@ -1103,4 +1166,7 @@ def save_settings():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    import os
+    port = int(os.environ.get('PORT', 5001))
+    print(f"🌐 Starting UI on http://localhost:{port}")
+    app.run(debug=True, host='0.0.0.0', port=port)

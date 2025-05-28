@@ -17,8 +17,15 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 
 
-class NovelCharacterIdentifier:
-    """AI-powered character identification for novels using two-pass analysis"""
+class NovelElementExtractor:
+    """
+    Advanced novel element extraction system for procedural generation.
+
+    Extracts reusable character patterns, location descriptions, and other
+    usable elements from novels. Uses batch processing (10 characters at once)
+    and comprehensive text analysis to extract depersonalized patterns
+    suitable for RPG content generation.
+    """
 
     def __init__(self, ai_config: Dict[str, Any] = None, debug: bool = False):
         self.ai_config = ai_config or {"provider": "mock"}
@@ -113,9 +120,19 @@ class NovelCharacterIdentifier:
                     print("⚠️  OpenRouter API key not found, using mock client")
                 return MockCharacterIdentifier()
 
+            # Don't default to Claude - require explicit model selection
+            model = self.ai_config.get("model")
+            if not model:
+                if self.debug:
+                    print("⚠️  OpenRouter requires explicit model selection, using mock client")
+                return MockCharacterIdentifier()
+
+            if self.debug:
+                print(f"🤖 Novel extractor using OpenRouter model: {model}")
+
             return OpenRouterCharacterClient(
                 api_key=api_key,
-                model=self.ai_config.get("model", "anthropic/claude-3.5-sonnet"),
+                model=model,
                 max_tokens=self.ai_config.get("max_tokens", 2000),
                 temperature=self.ai_config.get("temperature", 0.3),
                 timeout=self.ai_config.get("timeout", 30)
@@ -174,10 +191,16 @@ class NovelCharacterIdentifier:
             filtered_candidates, combined_text, metadata
         )
 
-        # Compile final results
+        # Step 5: Extract simple building blocks for procedural generation
+        self.logger.info("🧱 Step 4: Extracting simple building blocks")
+        building_blocks = self._extract_simple_building_blocks(combined_text, metadata)
+
+        # Compile final results with characters and building blocks
         final_result = {
             "characters": final_characters,
             "total_characters": len(final_characters),
+            "building_blocks": building_blocks,
+            "total_building_blocks": sum(len(blocks) for blocks in building_blocks.values() if isinstance(blocks, list)),
             "processing_stages": {
                 "discovery": discovery_result,
                 "filtering": {
@@ -188,6 +211,10 @@ class NovelCharacterIdentifier:
                 "analysis": {
                     "characters_analyzed": len(filtered_candidates),
                     "characters_confirmed": len(final_characters)
+                },
+                "building_block_extraction": {
+                    "total_blocks_extracted": sum(len(blocks) for blocks in building_blocks.values() if isinstance(blocks, list)),
+                    "block_categories": len(building_blocks.keys())
                 }
             },
             "metadata": {
@@ -195,13 +222,13 @@ class NovelCharacterIdentifier:
                 "author": metadata.get("author", "Unknown"),
                 "total_text_length": len(combined_text),
                 "sections_analyzed": len(sections),
-                "analysis_method": "optimized_chunked_discovery",
+                "analysis_method": "optimized_novel_element_extraction",
                 "chunks_processed": discovery_result.get("chunks_processed", 0),
                 "api_calls_made": discovery_result.get("api_calls_made", 0) + len(filtered_candidates)
             }
         }
 
-        self.logger.info(f"🎭 OPTIMIZED character identification complete: {final_result['total_characters']} characters found")
+        self.logger.info(f"🎭 NOVEL ELEMENT EXTRACTION complete: {final_result['total_characters']} characters, {final_result['total_building_blocks']} building blocks found")
         self.logger.info(f"📊 Processing stats: {discovery_result.get('chunks_processed', 0)} chunks, {final_result['metadata']['api_calls_made']} API calls")
         return final_result
 
@@ -1155,42 +1182,48 @@ BE THOROUGH: Find all named characters in this chunk, even minor ones.
 
     def _targeted_character_analysis(self, candidates: List[Dict], full_text: str,
                                    metadata: Dict[str, Any]) -> List[Dict]:
-        """Perform targeted analysis on filtered candidates with progress updates"""
+        """Perform targeted analysis on filtered candidates with BATCH PROCESSING (3-4 characters at once)"""
 
-        self.logger.info(f"🎯 Performing targeted analysis on {len(candidates)} candidates")
+        self.logger.info(f"🎯 Performing targeted batch analysis on {len(candidates)} candidates")
 
         # Send initial progress update
         if hasattr(self, 'progress_callback') and self.progress_callback:
             self.progress_callback('analysis', 'active', {
                 'candidates_to_analyze': len(candidates),
                 'characters_confirmed': 0,
-                'current_character': 'Starting analysis...'
+                'current_character': 'Starting batch analysis...'
             })
 
         final_characters = []
+        batch_size = 10  # Process 10 characters at once for better efficiency
 
-        for i, candidate in enumerate(candidates):
-            name = candidate.get("name", "")
-            mentions = candidate.get("total_mentions", 0)
+        # Process candidates in batches
+        for batch_start in range(0, len(candidates), batch_size):
+            batch_end = min(batch_start + batch_size, len(candidates))
+            batch = candidates[batch_start:batch_end]
+            batch_num = (batch_start // batch_size) + 1
+            total_batches = (len(candidates) + batch_size - 1) // batch_size
 
-            self.logger.info(f"🎯 Analyzing character {i+1}/{len(candidates)}: {name} ({mentions} mentions)")
+            batch_names = [candidate.get("name", "Unknown") for candidate in batch]
+            self.logger.info(f"🎯 Analyzing batch {batch_num}/{total_batches}: {', '.join(batch_names)}")
 
-            # Send progress update for current character
+            # Send progress update for current batch
             if hasattr(self, 'progress_callback') and self.progress_callback:
                 self.progress_callback('analysis', 'active', {
-                    'candidates_analyzed': i,
+                    'candidates_analyzed': batch_start,
                     'candidates_to_analyze': len(candidates),
                     'characters_confirmed': len(final_characters),
-                    'current_character': name,
-                    'current_mentions': mentions
+                    'current_character': f"Batch {batch_num}/{total_batches}: {', '.join(batch_names[:2])}{'...' if len(batch_names) > 2 else ''}",
+                    'batch_size': len(batch),
+                    'batch_number': batch_num
                 })
 
             try:
-                # Build targeted analysis prompt
-                prompt = self._build_targeted_analysis_prompt(candidate, full_text, metadata)
+                # Build batch analysis prompt
+                prompt = self._build_batch_analysis_prompt(batch, full_text, metadata)
 
-                # Get AI analysis
-                self.logger.info(f"🤖 Sending {name} to AI for detailed analysis...")
+                # Get AI analysis for the entire batch
+                self.logger.info(f"🤖 Sending batch {batch_num} ({len(batch)} characters) to AI for analysis...")
                 ai_response = self.ai_client.enhance_character_profiles(prompt)
 
                 # Parse response
@@ -1199,47 +1232,249 @@ BE THOROUGH: Find all named characters in this chunk, even minor ones.
                 else:
                     result = ai_response
 
-                # Extract enhanced character data
-                enhanced_character = result.get("character", {})
-                if enhanced_character and enhanced_character.get("is_valid_character", True):
-                    # Merge with original candidate data
-                    enhanced_character.update({
-                        "total_mentions": mentions,
-                        "mention_frequency": candidate.get("mention_frequency", 0),
-                        "discovery_confidence": candidate.get("confidence", 0.5)
-                    })
-                    final_characters.append(enhanced_character)
-                    self.logger.info(f"✅ Confirmed character: {name}")
-                else:
-                    self.logger.info(f"❌ Rejected candidate: {name}")
+                # Extract enhanced character data from batch response
+                enhanced_characters = result.get("characters", [])
 
-                # Send updated progress
+                # Process each character in the batch response
+                for i, candidate in enumerate(batch):
+                    name = candidate.get("name", "")
+                    mentions = candidate.get("total_mentions", 0)
+
+                    # Find corresponding enhanced character in AI response
+                    enhanced_character = None
+                    for enhanced in enhanced_characters:
+                        if enhanced.get("name", "").lower() == name.lower():
+                            enhanced_character = enhanced
+                            break
+
+                    if enhanced_character and enhanced_character.get("is_valid_character", True):
+                        # Merge with original candidate data
+                        enhanced_character.update({
+                            "total_mentions": mentions,
+                            "mention_frequency": candidate.get("mention_frequency", 0),
+                            "discovery_confidence": candidate.get("confidence", 0.5),
+                            "batch_processed": batch_num
+                        })
+                        final_characters.append(enhanced_character)
+                        self.logger.info(f"✅ Confirmed character: {name}")
+                    else:
+                        self.logger.info(f"❌ Rejected candidate: {name}")
+
+                # Send updated progress after batch completion
                 if hasattr(self, 'progress_callback') and self.progress_callback:
                     self.progress_callback('analysis', 'active', {
-                        'candidates_analyzed': i + 1,
+                        'candidates_analyzed': batch_end,
                         'candidates_to_analyze': len(candidates),
                         'characters_confirmed': len(final_characters),
-                        'current_character': name,
-                        'status': 'confirmed' if enhanced_character.get("is_valid_character", True) else 'rejected'
+                        'current_character': f"Batch {batch_num} complete",
+                        'batch_completed': batch_num
                     })
 
             except Exception as e:
-                self.logger.error(f"❌ Analysis failed for {name}: {e}")
-                # Include candidate with basic info on error
-                candidate["analysis_error"] = str(e)
-                final_characters.append(candidate)
+                self.logger.error(f"❌ Batch {batch_num} analysis failed: {e}")
+                # Include all candidates from failed batch with basic info
+                for candidate in batch:
+                    candidate["analysis_error"] = str(e)
+                    candidate["batch_processed"] = batch_num
+                    final_characters.append(candidate)
 
-        self.logger.info(f"🎯 Targeted analysis complete: {len(final_characters)} characters confirmed")
+        self.logger.info(f"🎯 Batch analysis complete: {len(final_characters)} characters confirmed from {total_batches} batches")
 
         # Send completion update
         if hasattr(self, 'progress_callback') and self.progress_callback:
             self.progress_callback('analysis', 'completed', {
                 'candidates_analyzed': len(candidates),
                 'characters_confirmed': len(final_characters),
-                'current_character': 'Analysis complete'
+                'current_character': 'Batch analysis complete',
+                'total_batches': total_batches
             })
 
         return final_characters
+
+    def _extract_simple_building_blocks(self, text: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract simple building blocks for procedural generation"""
+
+        self.logger.info("🧱 Extracting simple building blocks from novel text")
+
+        building_blocks = {
+            # Character building blocks
+            "physical_descriptors": [],
+            "body_parts": [],
+            "action_verbs": [],
+            "emotional_words": [],
+            "speech_verbs": [],
+
+            # Location building blocks
+            "size_descriptors": [],
+            "condition_descriptors": [],
+            "atmosphere_descriptors": [],
+            "location_types": [],
+            "weather_descriptors": [],
+
+            # General building blocks
+            "colors": [],
+            "textures": [],
+            "sounds": [],
+
+            # Future expansion placeholder
+            "future_complex_patterns": {
+                "status": "not_implemented",
+                "planned_features": [
+                    "description_templates",
+                    "transformation_rules",
+                    "context_adaptation"
+                ]
+            }
+        }
+
+        try:
+            # Extract physical descriptors
+            physical_descriptors = re.findall(r'\b(?:weathered|calloused|piercing|gentle|rough|smooth|scarred|strong|weak|tall|short|broad|narrow|thick|thin)\b', text, re.IGNORECASE)
+            building_blocks["physical_descriptors"] = list(set([word.lower() for word in physical_descriptors]))
+
+            # Extract body parts
+            body_parts = re.findall(r'\b(?:hands?|eyes?|voice|face|shoulders?|arms?|fingers?|lips?|hair|skin|forehead|cheeks?)\b', text, re.IGNORECASE)
+            building_blocks["body_parts"] = list(set([word.lower() for word in body_parts]))
+
+            # Extract action verbs
+            action_verbs = re.findall(r'\b(?:trembled?|gestured?|narrowed?|softened?|clenched?|relaxed?|tightened?|loosened?|moved?|shifted?|turned?|twisted?)\b', text, re.IGNORECASE)
+            building_blocks["action_verbs"] = list(set([word.lower() for word in action_verbs]))
+
+            # Extract emotional words
+            emotional_words = re.findall(r'\b(?:anger|fear|joy|sadness|concern|worry|relief|frustration|determination|hope|despair|love|hate|surprise|confusion)\b', text, re.IGNORECASE)
+            building_blocks["emotional_words"] = list(set([word.lower() for word in emotional_words]))
+
+            # Extract speech verbs
+            speech_verbs = re.findall(r'\b(?:said|whispered|shouted|hissed|muttered|declared|asked|replied|answered|called|cried|laughed|sighed)\b', text, re.IGNORECASE)
+            building_blocks["speech_verbs"] = list(set([word.lower() for word in speech_verbs]))
+
+            # Extract size descriptors
+            size_descriptors = re.findall(r'\b(?:massive|huge|enormous|vast|tiny|small|large|immense|gigantic|towering|looming|dwarfing)\b', text, re.IGNORECASE)
+            building_blocks["size_descriptors"] = list(set([word.lower() for word in size_descriptors]))
+
+            # Extract condition descriptors
+            condition_descriptors = re.findall(r'\b(?:ancient|old|new|fresh|worn|weathered|crumbling|pristine|ruined|restored|broken|whole|damaged)\b', text, re.IGNORECASE)
+            building_blocks["condition_descriptors"] = list(set([word.lower() for word in condition_descriptors]))
+
+            # Extract atmosphere descriptors
+            atmosphere_descriptors = re.findall(r'\b(?:dark|bright|mysterious|welcoming|forbidding|peaceful|chaotic|quiet|loud|bustling|empty|crowded)\b', text, re.IGNORECASE)
+            building_blocks["atmosphere_descriptors"] = list(set([word.lower() for word in atmosphere_descriptors]))
+
+            # Extract location types
+            location_types = re.findall(r'\b(?:mountain|hill|forest|woods|city|town|village|castle|tower|valley|plain|river|lake|sea|ocean)\b', text, re.IGNORECASE)
+            building_blocks["location_types"] = list(set([word.lower() for word in location_types]))
+
+            # Extract weather descriptors
+            weather_descriptors = re.findall(r'\b(?:sunny|cloudy|rainy|stormy|misty|foggy|clear|overcast|windy|calm|hot|cold|warm|cool)\b', text, re.IGNORECASE)
+            building_blocks["weather_descriptors"] = list(set([word.lower() for word in weather_descriptors]))
+
+            # Extract colors
+            colors = re.findall(r'\b(?:red|blue|green|yellow|black|white|grey|gray|brown|purple|orange|pink|silver|gold|golden)\b', text, re.IGNORECASE)
+            building_blocks["colors"] = list(set([word.lower() for word in colors]))
+
+            # Extract textures
+            textures = re.findall(r'\b(?:rough|smooth|soft|hard|silky|coarse|fine|thick|thin|bumpy|slick|sticky|dry|wet|damp)\b', text, re.IGNORECASE)
+            building_blocks["textures"] = list(set([word.lower() for word in textures]))
+
+            # Extract sounds
+            sounds = re.findall(r'\b(?:whisper|shout|scream|laugh|cry|sigh|gasp|moan|growl|roar|chirp|buzz|hum|ring|clang|thud)\b', text, re.IGNORECASE)
+            building_blocks["sounds"] = list(set([word.lower() for word in sounds]))
+
+            # Calculate totals
+            total_blocks = sum(len(blocks) for key, blocks in building_blocks.items() if isinstance(blocks, list))
+
+            self.logger.info(f"🧱 Building block extraction complete: {total_blocks} total blocks across {len([k for k, v in building_blocks.items() if isinstance(v, list)])} categories")
+
+            return building_blocks
+
+        except Exception as e:
+            self.logger.error(f"❌ Building block extraction failed: {e}")
+            return {
+                "physical_descriptors": [],
+                "body_parts": [],
+                "action_verbs": [],
+                "emotional_words": [],
+                "speech_verbs": [],
+                "size_descriptors": [],
+                "condition_descriptors": [],
+                "atmosphere_descriptors": [],
+                "location_types": [],
+                "weather_descriptors": [],
+                "colors": [],
+                "textures": [],
+                "sounds": [],
+                "error": str(e)
+            }
+
+    def _build_batch_analysis_prompt(self, batch: List[Dict], full_text: str,
+                                   metadata: Dict[str, Any]) -> str:
+        """Build prompt for batch character analysis (3-4 characters at once)"""
+
+        novel_title = metadata.get("book_title", "Unknown Novel")
+        author = metadata.get("author", "Unknown Author")
+
+        # Build character list for the batch
+        character_list = []
+        for i, candidate in enumerate(batch, 1):
+            name = candidate.get("name", "Unknown")
+            mentions = candidate.get("total_mentions", 0)
+            evidence = candidate.get("evidence", "No evidence provided")
+            character_list.append(f"{i}. {name} (mentioned {mentions} times) - {evidence}")
+
+        prompt = f"""You are analyzing characters from the novel "{novel_title}" by {author}.
+
+TASK: Analyze this BATCH of {len(batch)} character candidates simultaneously. This allows you to understand their relationships and interactions better than analyzing them individually.
+
+CHARACTER BATCH TO ANALYZE:
+{chr(10).join(character_list)}
+
+ANALYSIS INSTRUCTIONS:
+1. For each character, search the novel text for ALL mentions and appearances
+2. Determine if each is a valid individual character (not a place, object, or group)
+3. Extract detailed information about each character
+4. Identify relationships between characters in this batch
+5. Look for interactions, conversations, or shared scenes
+
+NOVEL TEXT TO SEARCH:
+{full_text[:100000]}{"..." if len(full_text) > 100000 else ""}
+
+Please respond with a JSON object:
+{{
+    "characters": [
+        {{
+            "name": "Character Name",
+            "is_valid_character": true,
+            "physical_description": "detailed description from text",
+            "personality": "personality traits observed",
+            "role": "protagonist/antagonist/supporting/minor",
+            "relationships": ["relationships to other characters in this batch or novel"],
+            "character_arc": "how they develop or change",
+            "key_quotes": ["important dialogue or thoughts"],
+            "key_actions": ["significant actions they take"],
+            "background": "backstory or history mentioned",
+            "importance": "major/supporting/minor",
+            "total_mentions": {batch[0].get("total_mentions", 0)},
+            "confidence": 0.9,
+            "batch_relationships": ["relationships to other characters in this specific batch"],
+            "shared_scenes": ["scenes where they appear with other batch characters"]
+        }}
+    ],
+    "batch_analysis": {{
+        "character_interactions": "how characters in this batch relate to each other",
+        "shared_storylines": "common plot threads involving these characters",
+        "group_dynamics": "how they function as a group if applicable"
+    }},
+    "confidence": 0.85,
+    "reasoning": "Explanation of batch analysis approach and character relationships"
+}}
+
+IMPORTANT:
+- Analyze ALL {len(batch)} characters in the batch
+- Focus on relationships between characters in this batch
+- Use the full novel text to find comprehensive information
+- Mark is_valid_character as false for non-characters (places, objects, groups)"""
+
+        return prompt
 
     def _build_targeted_analysis_prompt(self, candidate: Dict, full_text: str,
                                       metadata: Dict[str, Any]) -> str:
@@ -1656,7 +1891,7 @@ class AnthropicCharacterClient:
 class OpenRouterCharacterClient:
     """OpenRouter client for character identification"""
 
-    def __init__(self, api_key: str, model: str = "anthropic/claude-3.5-sonnet",
+    def __init__(self, api_key: str, model: str,
                  max_tokens: int = 2000, temperature: float = 0.3, timeout: int = 30):
         import openai
         self.client = openai.OpenAI(

@@ -605,7 +605,15 @@ class OpenRouterClient:
             base_url="https://openrouter.ai/api/v1"
         )
         self.ai_config = ai_config
-        self.model = ai_config.get("model", "anthropic/claude-3.5-sonnet")
+        # Don't default to Claude - require explicit model selection
+        self.model = ai_config.get("model")
+        if not self.model:
+            raise ValueError("OpenRouter requires explicit model selection. Please specify a model in ai_config.")
+
+        # Debug logging to show what model is being used
+        if ai_config.get("debug"):
+            print(f"🤖 Game detector using OpenRouter model: {self.model}")
+
         self.max_tokens = ai_config.get("max_tokens", 4000)
         self.temperature = ai_config.get("temperature", 0.1)
         self.timeout = ai_config.get("timeout", 30)

@@ -494,6 +494,11 @@ function extractContent() {
     document.getElementById('extraction-progress').style.display = 'block';
     updateProgress('extract', 'active');
 
+    // Start progress polling for novel extraction
+    if (currentContentType === 'novel') {
+        startProgressPolling(currentSessionId);
+    }
+
     // Get text quality settings
     const enableTextEnhancement = document.getElementById('enableTextEnhancement')?.checked ?? true;
     const aggressiveCleanup = document.getElementById('aggressiveCleanup')?.checked ?? false;
@@ -520,6 +525,9 @@ function extractContent() {
         return response.json();
     })
     .then(data => {
+        // Stop progress polling
+        stopProgressPolling();
+
         document.getElementById('extraction-progress').style.display = 'none';
         document.getElementById('extract-btn').disabled = false;
 
@@ -534,6 +542,10 @@ function extractContent() {
     })
     .catch(error => {
         console.error('Extraction error:', error);
+
+        // Stop progress polling on error
+        stopProgressPolling();
+
         document.getElementById('extraction-progress').style.display = 'none';
         document.getElementById('extract-btn').disabled = false;
 
@@ -1876,6 +1888,68 @@ function addTokenUsage(tokens, apiCalls = 1) {
     sessionTokens += tokens;
     sessionApiCalls += apiCalls;
     updateTokenDisplay();
+}
+
+// ===== REAL-TIME PROGRESS POLLING =====
+
+let progressPollingInterval = null;
+
+function startProgressPolling(sessionId) {
+    console.log(`Starting progress polling for session: ${sessionId}`);
+
+    // Clear any existing polling
+    if (progressPollingInterval) {
+        clearInterval(progressPollingInterval);
+    }
+
+    // Poll every 1 second
+    progressPollingInterval = setInterval(() => {
+        fetchProgress(sessionId);
+    }, 1000);
+}
+
+function stopProgressPolling() {
+    if (progressPollingInterval) {
+        clearInterval(progressPollingInterval);
+        progressPollingInterval = null;
+        console.log('Progress polling stopped');
+    }
+}
+
+function fetchProgress(sessionId) {
+    fetch(`/progress/${sessionId}`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                updateProgressFromData(data.progress);
+            }
+        })
+        .catch(error => {
+            console.error('Progress polling error:', error);
+            // Don't stop polling on error, just log it
+        });
+}
+
+function updateProgressFromData(progressData) {
+    // Update novel progress based on received data
+    for (const [stage, stageData] of Object.entries(progressData)) {
+        const status = stageData.status;
+        const details = stageData.details;
+
+        // Update the appropriate progress indicators
+        if (stage === 'discovery') {
+            updateNovelProgress('discovery', status, details);
+        } else if (stage === 'filtering') {
+            updateNovelProgress('filtering', status, details);
+        } else if (stage === 'analysis') {
+            updateNovelProgress('analysis', status, details);
+        }
+
+        // Update token usage if available
+        if (details.api_calls_made) {
+            addTokenUsage(0, details.api_calls_made);
+        }
+    }
 }
 
 function resetProgress() {

@@ -25,6 +25,7 @@ from Modules.pdf_processor import MultiGamePDFProcessor
 from Modules.multi_collection_manager import MultiGameCollectionManager
 from Modules.mongodb_manager import MongoDBManager
 from Modules.openrouter_models import openrouter_models
+from version import __version__, __build_date__, __commit_hash__, __branch__, __environment__, get_version_info
 
 app = Flask(__name__)
 app.secret_key = 'extraction_v3_ui_secret_key_change_in_production'
@@ -126,7 +127,13 @@ def allowed_file(filename):
 @app.route('/')
 def index():
     """Main dashboard page"""
-    return render_template('index.html')
+    version_info = get_version_info()
+    return render_template('index.html', version_info=version_info)
+
+@app.route('/api/version')
+def get_version():
+    """Get application version information"""
+    return jsonify(get_version_info())
 
 @app.route('/api/providers/available')
 def get_available_providers():
@@ -846,7 +853,8 @@ def system_status():
             'mongodb_collections': mongodb_collections,
             'ai_providers': ai_providers,
             'active_sessions': len(analysis_results),
-            'completed_extractions': len(extraction_results)
+            'completed_extractions': len(extraction_results),
+            'version': get_version_info()
         })
 
     except Exception as e:

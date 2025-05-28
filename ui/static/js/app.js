@@ -1213,6 +1213,14 @@ function displaySystemStatus(status) {
             Active Sessions: ${status.active_sessions}<br>
             Completed: ${status.completed_extractions}
         </div>
+        <div class="mt-3 pt-3 border-top">
+            <strong>Version Info:</strong>
+            <div class="small text-muted">
+                Version: ${status.version.version}<br>
+                Build: ${status.version.build_date}<br>
+                Environment: ${status.version.environment}
+            </div>
+        </div>
     `;
 
     document.getElementById('status-content').innerHTML = statusHtml;

@@ -73,11 +73,17 @@ def check_environment():
 
 def main():
     """Main startup function"""
-    print("🚀 Starting AI-Powered Extraction v3 Web UI")
+    # Get version information
+    current_dir = Path.cwd()
+    sys.path.append(str(current_dir))
+    from version import __version__, __build_date__, __environment__
+    
+    print(f"🚀 Starting AI-Powered Extraction v3 Web UI - Version {__version__}")
+    print(f"📅 Build Date: {__build_date__}")
+    print(f"🔧 Environment: {__environment__}")
     print("=" * 50)
 
     # Check if we're in the right directory
-    current_dir = Path.cwd()
     if not (current_dir / "ui" / "app.py").exists():
         print("❌ Please run this script from the extractor directory:")
         print("   cd extractor")

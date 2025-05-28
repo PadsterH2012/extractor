@@ -1237,6 +1237,11 @@ function browseChromaDB() {
 
 // Browse MongoDB collections
 function browseMongoDB() {
+    openMongoDBBrowser();
+}
+
+// LEGACY MongoDB browsing function - kept for backward compatibility
+function _browseMongoDB_legacy() {
     fetch('/browse_mongodb')
     .then(response => response.json())
     .then(data => {

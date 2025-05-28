@@ -935,6 +935,44 @@ def browse_chromadb_collection(collection_name):
         logger.error(f"ChromaDB collection browse error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/mongodb/collections', methods=['GET'])
+def list_mongodb_collections():
+    """Get list of all MongoDB collections with metadata"""
+    try:
+        mongodb_manager = MongoDBManager()
+        if not mongodb_manager.connected:
+            return jsonify({'success': False, 'error': 'MongoDB not connected'}), 500
+            
+        collections = mongodb_manager.list_collections_with_metadata()
+        return jsonify({
+            'success': True,
+            'collections': collections,
+            'total_collections': len(collections)
+        })
+    except Exception as e:
+        logger.error(f"MongoDB collections list error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/mongodb/collections/<collection_name>', methods=['GET'])
+def get_collection_info(collection_name):
+    """Get detailed information about a specific collection"""
+    try:
+        mongodb_manager = MongoDBManager()
+        if not mongodb_manager.connected:
+            return jsonify({'success': False, 'error': 'MongoDB not connected'}), 500
+            
+        info = mongodb_manager.get_collection_info(collection_name)
+        if not info:
+            return jsonify({'success': False, 'error': 'Collection not found'}), 404
+            
+        return jsonify({
+            'success': True,
+            'collection_info': info
+        })
+    except Exception as e:
+        logger.error(f"MongoDB collection info error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/browse_mongodb')
 def browse_mongodb():
     """Browse MongoDB collections and documents"""
@@ -976,6 +1014,80 @@ def browse_mongodb():
     except Exception as e:
         logger.error(f"MongoDB browse error: {e}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/mongodb/collections/<collection_name>/documents', methods=['GET'])
+def get_collection_documents(collection_name):
+    """Get documents from a collection with pagination"""
+    try:
+        mongodb_manager = MongoDBManager()
+        if not mongodb_manager.connected:
+            return jsonify({'success': False, 'error': 'MongoDB not connected'}), 500
+            
+        page = int(request.args.get('page', 1))
+        limit = int(request.args.get('limit', 20))
+        search = request.args.get('search', '')
+        
+        result = mongodb_manager.get_documents_paginated(
+            collection_name, page, limit, search
+        )
+        
+        return jsonify({
+            'success': True,
+            'collection': collection_name,
+            'documents': result['documents'],
+            'pagination': result['pagination']
+        })
+    except Exception as e:
+        logger.error(f"MongoDB documents error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/mongodb/collections/<collection_name>/documents/<document_id>', methods=['GET'])
+def get_document_details(collection_name, document_id):
+    """Get detailed view of a specific document"""
+    try:
+        mongodb_manager = MongoDBManager()
+        if not mongodb_manager.connected:
+            return jsonify({'success': False, 'error': 'MongoDB not connected'}), 500
+            
+        document = mongodb_manager.get_document_by_id(collection_name, document_id)
+        if not document:
+            return jsonify({'success': False, 'error': 'Document not found'}), 404
+            
+        return jsonify({
+            'success': True,
+            'document': document
+        })
+    except Exception as e:
+        logger.error(f"MongoDB document details error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/mongodb/collections/<collection_name>/export', methods=['GET'])
+def export_collection(collection_name):
+    """Export collection as JSON or CSV"""
+    try:
+        format_type = request.args.get('format', 'json')
+        mongodb_manager = MongoDBManager()
+        
+        if not mongodb_manager.connected:
+            return jsonify({'success': False, 'error': 'MongoDB not connected'}), 500
+        
+        if format_type == 'json':
+            data = mongodb_manager.export_collection_json(collection_name)
+            return send_file(data, 
+                          download_name=f'{collection_name}.json',
+                          mimetype='application/json',
+                          as_attachment=True)
+        elif format_type == 'csv':
+            data = mongodb_manager.export_collection_csv(collection_name)
+            return send_file(data,
+                          download_name=f'{collection_name}.csv',
+                          mimetype='text/csv',
+                          as_attachment=True)
+        else:
+            return jsonify({'success': False, 'error': 'Invalid export format'}), 400
+    except Exception as e:
+        logger.error(f"MongoDB export error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/browse_mongodb/<collection_name>')
 def browse_mongodb_collection(collection_name):

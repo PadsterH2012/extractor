@@ -5,8 +5,12 @@ MongoDB connection and collection management for AI-Powered Extraction v3
 """
 
 import os
+import io
+import csv
+import json
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, BinaryIO
+from bson import ObjectId
 
 # Try to import dotenv for loading environment variables from .env file
 try:
@@ -458,6 +462,203 @@ class MongoDBManager:
                 found_tags.append(term)
 
         return found_tags[:10]  # Limit to 10 tags
+        
+    def list_collections_with_metadata(self) -> List[Dict[str, Any]]:
+        """Get list of collections with metadata"""
+        if not self.connected:
+            return []
+        
+        collections = []
+        try:
+            for collection_name in self.database.list_collection_names():
+                collection = self.database[collection_name]
+                
+                # Get collection stats
+                stats = self.database.command('collStats', collection_name)
+                
+                # Parse collection name for hierarchical organization
+                collection_parts = self._parse_collection_name(collection_name)
+                
+                # Get document count
+                doc_count = collection.count_documents({})
+                
+                collections.append({
+                    'name': collection_name,
+                    'document_count': doc_count,
+                    'size_bytes': stats.get('size', 0),
+                    'avg_document_size': stats.get('avgObjSize', 0),
+                    'indexes': len(list(collection.list_indexes())),
+                    'storage_size': stats.get('storageSize', 0),
+                    'game_type': collection_parts.get('game_type', ''),
+                    'edition': collection_parts.get('edition', ''),
+                    'book_type': collection_parts.get('book_type', ''),
+                    'hierarchical': bool(collection_parts)
+                })
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Error listing collections: {e}")
+                
+        return sorted(collections, key=lambda x: x['name'])
+    
+    def get_documents_paginated(self, collection_name: str, page: int = 1, 
+                              limit: int = 20, search: str = '') -> Dict[str, Any]:
+        """Get paginated documents from collection with optional search"""
+        if not self.connected:
+            return {'documents': [], 'pagination': {}}
+        
+        collection = self.database[collection_name]
+        
+        # Build search filter
+        filter_query = {}
+        if search:
+            # Try to search across common fields
+            filter_query = {
+                '$or': [
+                    {'title': {'$regex': search, '$options': 'i'}},
+                    {'content': {'$regex': search, '$options': 'i'}},
+                    {'game_type': {'$regex': search, '$options': 'i'}},
+                    {'description': {'$regex': search, '$options': 'i'}},
+                    {'text': {'$regex': search, '$options': 'i'}}
+                ]
+            }
+        
+        # Get total count
+        total_documents = collection.count_documents(filter_query)
+        
+        # Calculate pagination
+        total_pages = max(1, (total_documents + limit - 1) // limit)
+        page = min(max(1, page), total_pages)  # Ensure page is within bounds
+        skip = (page - 1) * limit
+        
+        # Get documents
+        cursor = collection.find(filter_query).skip(skip).limit(limit).sort('_id', -1)
+        documents = list(cursor)
+        
+        # Convert ObjectId to string for JSON serialization
+        for doc in documents:
+            if '_id' in doc:
+                doc['_id'] = str(doc['_id'])
+        
+        return {
+            'documents': documents,
+            'pagination': {
+                'current_page': page,
+                'total_pages': total_pages,
+                'total_documents': total_documents,
+                'documents_per_page': limit,
+                'has_next': page < total_pages,
+                'has_prev': page > 1
+            }
+        }
+    
+    def get_document_by_id(self, collection_name: str, document_id: str) -> Dict[str, Any]:
+        """Get detailed view of a specific document"""
+        if not self.connected:
+            return {}
+        
+        collection = self.database[collection_name]
+        
+        try:
+            # Try to convert string ID to ObjectId if it's in that format
+            if ObjectId.is_valid(document_id):
+                doc = collection.find_one({'_id': ObjectId(document_id)})
+            else:
+                doc = collection.find_one({'_id': document_id})
+                
+            if not doc:
+                return {}
+                
+            # Convert ObjectId to string for JSON serialization
+            if '_id' in doc and isinstance(doc['_id'], ObjectId):
+                doc['_id'] = str(doc['_id'])
+                
+            return doc
+            
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Error getting document: {e}")
+            return {}
+    
+    def export_collection_json(self, collection_name: str) -> BinaryIO:
+        """Export collection as JSON"""
+        if not self.connected:
+            return io.BytesIO(b'{"error": "Not connected to MongoDB"}')
+        
+        try:
+            collection = self.database[collection_name]
+            documents = list(collection.find())
+            
+            # Convert ObjectId to string for JSON serialization
+            for doc in documents:
+                if '_id' in doc:
+                    doc['_id'] = str(doc['_id'])
+            
+            # Create JSON data
+            json_data = json.dumps(documents, default=str, indent=2)
+            
+            # Create in-memory file
+            file_obj = io.BytesIO(json_data.encode('utf-8'))
+            file_obj.seek(0)
+            
+            return file_obj
+            
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Error exporting collection as JSON: {e}")
+            return io.BytesIO(str(e).encode('utf-8'))
+    
+    def export_collection_csv(self, collection_name: str) -> BinaryIO:
+        """Export collection as CSV"""
+        if not self.connected:
+            return io.BytesIO(b'Error: Not connected to MongoDB')
+        
+        try:
+            collection = self.database[collection_name]
+            documents = list(collection.find())
+            
+            # Create in-memory file
+            file_obj = io.StringIO()
+            
+            if not documents:
+                file_obj.write("No documents found in collection")
+                binary_obj = io.BytesIO(file_obj.getvalue().encode('utf-8'))
+                binary_obj.seek(0)
+                return binary_obj
+            
+            # Get all field names from all documents
+            fieldnames = set()
+            for doc in documents:
+                # Convert ObjectId to string
+                if '_id' in doc:
+                    doc['_id'] = str(doc['_id'])
+                    
+                # Add all top-level fields
+                fieldnames.update(doc.keys())
+            
+            # Create CSV writer
+            writer = csv.DictWriter(file_obj, fieldnames=sorted(fieldnames))
+            writer.writeheader()
+            
+            # Write data
+            for doc in documents:
+                # Flatten nested objects to strings for CSV compatibility
+                flat_doc = {}
+                for key, value in doc.items():
+                    if isinstance(value, dict) or isinstance(value, list):
+                        flat_doc[key] = json.dumps(value)
+                    else:
+                        flat_doc[key] = value
+                writer.writerow(flat_doc)
+            
+            # Convert to binary and return
+            binary_obj = io.BytesIO(file_obj.getvalue().encode('utf-8'))
+            binary_obj.seek(0)
+            return binary_obj
+            
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Error exporting collection as CSV: {e}")
+            return io.BytesIO(str(e).encode('utf-8'))
 
     def upload_chromadb_results(self, chroma_results: List[Dict[str, Any]],
                               mongo_collection: str,

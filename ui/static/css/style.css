@@ -5,6 +5,23 @@ body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
 }
 
+/* Version badge styles */
+.version-badge {
+    font-size: 0.75rem;
+    background-color: rgba(255, 255, 255, 0.2);
+    padding: 0.2rem 0.5rem;
+    border-radius: 1rem;
+    font-weight: 500;
+    vertical-align: middle;
+}
+
+/* Footer styles */
+.app-footer {
+    border-top: 1px solid #e9ecef;
+    padding: 1rem 0;
+    font-size: 0.875rem;
+}
+
 /* Upload Area Styles */
 .upload-area {
     border: 2px dashed #dee2e6;

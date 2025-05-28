@@ -40,6 +40,14 @@ from Modules.multi_collection_manager import MultiGameCollectionManager
 from Modules.game_configs import get_supported_games
 
 def main():
+    # Import version information
+    from version import __version__, __build_date__, __environment__
+    
+    # Display version information
+    print(f"🚀 Extraction v3 - Version {__version__}")
+    print(f"📅 Build Date: {__build_date__}")
+    print(f"🔧 Environment: {__environment__}")
+    
     parser = argparse.ArgumentParser(
         description="Extraction v3: Multi-Game RPG PDF Processor",
         formatter_class=argparse.RawDescriptionHelpFormatter,

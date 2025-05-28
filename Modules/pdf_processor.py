@@ -89,7 +89,7 @@ class MultiGamePDFProcessor:
         else:
             # Use AI detection
             game_metadata = self.game_detector.analyze_game_metadata(pdf_path)
-        
+
         # Add content type to metadata
         if content_type:
             game_metadata['content_type'] = content_type
@@ -98,16 +98,45 @@ class MultiGamePDFProcessor:
 
         # Extract ISBN from PDF metadata and content
         isbn_data = self._extract_isbn(doc, pdf_path)
-        
+
+        # For novels, check ISBN blacklist to prevent duplicate processing
+        if game_metadata['content_type'] == 'novel' and isbn_data.get('isbn'):
+            blacklist_result = self._check_isbn_blacklist(isbn_data['isbn'])
+            if blacklist_result['is_duplicate']:
+                doc.close()
+                raise Exception(f"ISBN_DUPLICATE: This novel has already been processed on {blacklist_result['extraction_date']}. "
+                              f"Extracted {blacklist_result['total_patterns']} patterns from {blacklist_result['characters_processed']} characters.")
+
         # Log detected information
         self.logger.info(f"🎮 Game: {game_metadata['game_type']}")
         self.logger.info(f"📖 Edition: {game_metadata['edition']}")
         self.logger.info(f"📚 Book: {game_metadata.get('book_type', 'Unknown')}")
         self.logger.info(f"📑 Content Type: {game_metadata['content_type']}")
         self.logger.info(f"🏷️  Collection: {game_metadata['collection_name']}")
+        if isbn_data.get('isbn'):
+            self.logger.info(f"📚 ISBN: {isbn_data['isbn']}")
 
-        # Extract content with game context
-        extracted_sections = self._extract_sections(doc, game_metadata)
+        # Extract content with game context - different workflows for novels vs source material
+        if game_metadata['content_type'] == 'novel':
+            # MEMORY OPTIMIZATION: Disable text enhancement for novels to reduce memory usage
+            original_text_enhancement = self.enable_text_enhancement
+            self.enable_text_enhancement = False
+            self.logger.info("🧠 Memory optimization: Disabled text enhancement for novel processing")
+
+            try:
+                extracted_sections = self._extract_novel_content(doc, game_metadata)
+
+                # For novels, perform character identification after content extraction
+                character_results = self._identify_novel_characters(extracted_sections, game_metadata)
+
+                # Add character information to metadata for future pattern extraction
+                game_metadata['character_identification'] = character_results
+            finally:
+                # Restore original text enhancement setting
+                self.enable_text_enhancement = original_text_enhancement
+
+        else:
+            extracted_sections = self._extract_sections(doc, game_metadata)
 
         doc.close()
 
@@ -115,6 +144,10 @@ class MultiGamePDFProcessor:
         complete_metadata = self._build_complete_metadata(pdf_path, game_metadata, isbn_data)
 
         self.logger.info(f"Extracted {len(extracted_sections)} sections")
+
+        # For novels, add ISBN to blacklist after successful extraction
+        if game_metadata['content_type'] == 'novel' and isbn_data.get('isbn'):
+            self._add_to_isbn_blacklist(isbn_data['isbn'], complete_metadata, extracted_sections)
 
         return {
             "metadata": complete_metadata,
@@ -216,6 +249,241 @@ class MultiGamePDFProcessor:
 
         return sections
 
+    def _extract_novel_content(self, doc, game_metadata: Dict[str, str]) -> List[Dict[str, Any]]:
+        """Extract content from novels with narrative-focused processing"""
+        self.logger.info("🔖 Processing novel content with narrative extraction")
+
+        sections = []
+        total_tables = 0
+
+        for page_num in range(len(doc)):
+            self.logger.debug(f"Processing novel page {page_num + 1}/{len(doc)}")
+
+            page = doc[page_num]
+            text = page.get_text()
+
+            if text.strip():
+                # For novels, we focus on narrative flow rather than structured content
+                # Handle multi-column layout (less common in novels but possible)
+                blocks = page.get_text("dict")
+                is_multi_column = self._detect_multi_column_layout(blocks, page.rect.width)
+
+                if is_multi_column:
+                    text = self._process_multi_column_text(blocks, page.rect.width)
+
+                # Apply text quality enhancement if enabled
+                original_text = text
+                text_quality_result = None
+                if self.enable_text_enhancement and text.strip():
+                    text_quality_result = self.text_enhancer.enhance_text_quality(
+                        text,
+                        aggressive=self.aggressive_cleanup
+                    )
+                    if text_quality_result and text_quality_result.cleaned_text:
+                        text = text_quality_result.cleaned_text
+
+                # Extract tables (less common in novels but still possible)
+                tables = self._extract_tables_from_page(doc.name, page_num)
+                total_tables += len(tables)
+
+                # Generate title from first line or chapter detection
+                first_line = text.split('\n')[0].strip()[:100]
+                title = self._detect_novel_section_title(text, first_line, page_num)
+
+                # Novel-specific categorization (different from RPG source material)
+                category = self._categorize_novel_content(text, game_metadata)
+
+                section = {
+                    "page": page_num + 1,
+                    "title": title,
+                    "content": text,
+                    "word_count": len(text.split()) if text else 0,
+                    "tables": tables,
+                    "has_tables": len(tables) > 0,
+                    "table_count": len(tables),
+                    "is_multi_column": is_multi_column,
+                    "category": category,
+                    "extraction_method": "novel_narrative_extraction",
+                    "extraction_confidence": 0.85,  # Novel extraction is generally more straightforward
+                    "content_type": "novel",
+                    "narrative_elements": self._detect_narrative_elements(text)
+                }
+
+                # Add text quality information if enhancement was used
+                if text_quality_result:
+                    quality_summary = self.text_enhancer.get_quality_summary(text_quality_result)
+                    section.update({
+                        "text_quality_enhanced": True,
+                        "text_quality_before": quality_summary["before"],
+                        "text_quality_after": quality_summary["after"],
+                        "text_quality_improvement": quality_summary["improvement"],
+                        "corrections_made": len(text_quality_result.corrections_made),
+                        "cleanup_aggressive": self.aggressive_cleanup
+                    })
+                else:
+                    section["text_quality_enhanced"] = False
+
+                sections.append(section)
+
+        self.logger.info(f"📖 Novel extraction complete: {len(sections)} sections, {total_tables} tables")
+        return sections
+
+    def _detect_novel_section_title(self, text: str, first_line: str, page_num: int) -> str:
+        """Detect section titles in novels (chapters, parts, etc.)"""
+
+        # Look for chapter markers
+        chapter_patterns = [
+            r'^(Chapter\s+\d+)',
+            r'^(CHAPTER\s+\d+)',
+            r'^(Part\s+\d+)',
+            r'^(PART\s+\d+)',
+            r'^(\d+\.)',
+            r'^([IVX]+\.)',  # Roman numerals
+        ]
+
+        for pattern in chapter_patterns:
+            match = re.match(pattern, first_line.strip(), re.IGNORECASE)
+            if match:
+                return match.group(1)
+
+        # If no chapter marker, use first meaningful line
+        if len(first_line) > 10:
+            return first_line
+        else:
+            return f"Page {page_num + 1}"
+
+    def _categorize_novel_content(self, text: str, game_metadata: Dict[str, Any]) -> str:
+        """Categorize novel content (different from RPG source material)"""
+
+        text_lower = text.lower()
+
+        # Novel-specific categories
+        if any(word in text_lower for word in ['chapter', 'part', 'book', 'prologue', 'epilogue']):
+            return "Chapter/Section"
+        elif any(word in text_lower for word in ['dialogue', '"', "'", 'said', 'asked', 'replied']):
+            return "Dialogue"
+        elif any(word in text_lower for word in ['description', 'looked', 'appeared', 'seemed', 'was']):
+            return "Description"
+        elif any(word in text_lower for word in ['action', 'moved', 'ran', 'walked', 'fought']):
+            return "Action"
+        elif any(word in text_lower for word in ['thought', 'remembered', 'wondered', 'realized']):
+            return "Internal Monologue"
+        else:
+            return "Narrative"
+
+    def _detect_narrative_elements(self, text: str) -> Dict[str, Any]:
+        """Detect narrative elements in novel text for future pattern extraction"""
+
+        text_lower = text.lower()
+
+        # Count different narrative elements (foundation for future pattern extraction)
+        elements = {
+            "dialogue_markers": len(re.findall(r'"[^"]*"', text)),
+            "character_mentions": len(re.findall(r'\b[A-Z][a-z]+\b', text)),  # Proper nouns (potential characters)
+            "action_verbs": len([word for word in text_lower.split() if word in ['ran', 'walked', 'moved', 'jumped', 'fought', 'attacked']]),
+            "descriptive_adjectives": len([word for word in text_lower.split() if word in ['beautiful', 'dark', 'tall', 'strong', 'mysterious', 'ancient']]),
+            "emotional_words": len([word for word in text_lower.split() if word in ['angry', 'sad', 'happy', 'afraid', 'excited', 'worried']]),
+            "has_dialogue": '"' in text,
+            "has_action": any(word in text_lower for word in ['ran', 'walked', 'moved', 'fought']),
+            "has_description": any(word in text_lower for word in ['looked', 'appeared', 'seemed', 'beautiful', 'dark'])
+        }
+
+        return elements
+
+    def _identify_novel_characters(self, sections: List[Dict[str, Any]], game_metadata: Dict[str, Any]) -> Dict[str, Any]:
+        """Identify characters in novel content using two-pass AI analysis with progress updates"""
+
+        try:
+            # Import character identifier
+            from .novel_character_identifier import NovelCharacterIdentifier
+
+            # Get AI configuration from the processor's config
+            ai_config = getattr(self, 'ai_config', {"provider": "mock"})
+
+            # Initialize character identifier
+            character_identifier = NovelCharacterIdentifier(ai_config=ai_config, debug=self.debug)
+
+            # Add progress callback for real-time updates
+            character_identifier.progress_callback = self._character_progress_callback
+
+            # Perform character identification
+            self.logger.info("🎭 Starting character identification for novel")
+            character_results = character_identifier.identify_characters(sections, game_metadata)
+
+            # Log results
+            total_characters = character_results.get('total_characters', 0)
+            self.logger.info(f"🎭 Character identification complete: {total_characters} characters identified")
+
+            if self.debug and total_characters > 0:
+                character_names = [char['name'] for char in character_results.get('characters', [])]
+                print(f"📝 Characters found: {', '.join(character_names)}")
+
+            return character_results
+
+        except Exception as e:
+            self.logger.error(f"Character identification failed: {e}")
+            if self.debug:
+                print(f"❌ Character identification error: {e}")
+
+            # Return empty result on failure
+            return {
+                "characters": [],
+                "total_characters": 0,
+                "processing_stages": {
+                    "error": f"Character identification failed: {str(e)}"
+                },
+                "metadata": {
+                    "novel_title": game_metadata.get("book_title", "Unknown"),
+                    "author": game_metadata.get("author", "Unknown"),
+                    "error": "Character identification system unavailable"
+                }
+            }
+
+    def _character_progress_callback(self, stage: str, status: str, details: Dict[str, Any]):
+        """
+        Progress callback for character identification stages
+
+        Args:
+            stage: Current stage (discovery, filtering, analysis)
+            status: Status (active, completed, error)
+            details: Stage-specific progress details
+        """
+
+        # Log progress with detailed information
+        if stage == 'discovery':
+            if 'current_chunk' in details:
+                chunk_num = details['current_chunk']
+                total_chunks = details['total_chunks']
+                candidates = details.get('candidates_found', 0)
+                self.logger.info(f"📖 Discovery: Processing chunk {chunk_num}/{total_chunks} - {candidates} candidates found")
+
+        elif stage == 'filtering':
+            if 'current_candidate' in details:
+                processed = details.get('candidates_processed', 0)
+                total = details.get('candidates_to_filter', 0)
+                filtered = details.get('candidates_filtered', 0)
+                ratio = details.get('filter_ratio', 0) * 100
+                self.logger.info(f"🔍 Filtering: {processed}/{total} processed - {filtered} passed ({ratio:.1f}%)")
+
+        elif stage == 'analysis':
+            if 'current_character' in details:
+                analyzed = details.get('candidates_analyzed', 0)
+                total = details.get('candidates_to_analyze', 0)
+                confirmed = details.get('characters_confirmed', 0)
+                character = details.get('current_character', 'Unknown')
+                self.logger.info(f"🎯 Analysis: {analyzed}/{total} - {confirmed} confirmed - Current: {character}")
+
+        # If debug mode, also print to console for immediate feedback
+        if self.debug:
+            if stage == 'discovery' and 'current_chunk' in details:
+                print(f"🔄 Processing chunk {details['current_chunk']}/{details['total_chunks']} ({details.get('candidates_found', 0)} candidates)")
+            elif stage == 'filtering' and status == 'completed':
+                print(f"🔍 Filtering complete: {details.get('candidates_filtered', 0)} candidates passed")
+            elif stage == 'analysis' and 'current_character' in details:
+                print(f"🎯 Analyzing: {details.get('current_character', 'Unknown')}")
+            elif status == 'completed':
+                print(f"✅ {stage.title()} stage completed")
+
     def _create_forced_metadata(self, pdf_path: Path, force_game_type: Optional[str],
                                force_edition: Optional[str]) -> Dict[str, Any]:
         """Create metadata when game type or edition is forced"""
@@ -251,9 +519,28 @@ class MultiGamePDFProcessor:
     def _generate_collection_name(self, metadata: Dict[str, Any]) -> str:
         """Generate collection name from metadata"""
         prefix = metadata.get("collection_prefix", "unknown")
-        edition = metadata["edition"].replace(".", "").lower()
-        book = metadata["book_type"].lower()
-        return f"{prefix}_{edition}_{book}"
+        edition = metadata.get("edition", "unknown")
+        book = metadata.get("book_type", "core")
+        content_type = metadata.get("content_type", "source_material")
+
+        # Handle None values and clean up strings
+        if edition is None or edition.lower() in ["unknown", "n/a", "none"]:
+            edition = "unknown"
+        else:
+            edition = str(edition).replace(".", "").lower()
+
+        if book is None:
+            book = "core"
+        else:
+            book = str(book).lower()
+
+        # Special handling for novels - they don't have meaningful editions
+        if content_type == "novel":
+            # For novels, use a simpler naming scheme: prefix_novel
+            return f"{prefix}_novel"
+        else:
+            # For source material, use the traditional scheme
+            return f"{prefix}_{edition}_{book}"
 
     def _detect_multi_column_layout(self, blocks: Dict, page_width: float) -> bool:
         """Detect multi-column layout"""
@@ -384,7 +671,7 @@ class MultiGamePDFProcessor:
             "detected_categories": game_metadata.get("detected_categories", []),
             "language": game_metadata.get("language", "English")
         }
-        
+
         # Add ISBN information if available
         if isbn_data:
             if isbn_data.get("isbn"):
@@ -397,6 +684,128 @@ class MultiGamePDFProcessor:
                 metadata["isbn_source"] = isbn_data["source"]
 
         return metadata
+
+    def _check_isbn_blacklist(self, isbn: str) -> Dict[str, Any]:
+        """
+        Check if an ISBN is in the blacklist (already processed)
+
+        Args:
+            isbn: ISBN number to check
+
+        Returns:
+            Dictionary with blacklist check results
+        """
+        try:
+            # Import MongoDB manager here to avoid circular imports
+            from .mongodb_manager import MongoDBManager
+
+            mongodb_manager = MongoDBManager(debug=self.debug)
+            if not mongodb_manager.connected:
+                # If MongoDB is not available, allow processing
+                return {
+                    'is_duplicate': False,
+                    'error': 'MongoDB not available for blacklist checking'
+                }
+
+            # Check blacklist collection
+            blacklist_collection = mongodb_manager.database['rpger.extraction.blacklist']
+            existing_entry = blacklist_collection.find_one({'isbn': isbn})
+
+            if existing_entry:
+                return {
+                    'is_duplicate': True,
+                    'extraction_date': existing_entry.get('extraction_date', 'Unknown'),
+                    'total_patterns': existing_entry.get('total_patterns', 0),
+                    'characters_processed': existing_entry.get('characters_processed', 0),
+                    'title': existing_entry.get('title', 'Unknown'),
+                    'existing_entry': existing_entry
+                }
+            else:
+                return {
+                    'is_duplicate': False,
+                    'message': 'ISBN not found in blacklist - safe to process'
+                }
+
+        except Exception as e:
+            # If there's an error checking the blacklist, log it but allow processing
+            if self.debug:
+                print(f"⚠️  Error checking ISBN blacklist: {e}")
+            return {
+                'is_duplicate': False,
+                'error': f'Blacklist check failed: {str(e)}'
+            }
+
+    def _add_to_isbn_blacklist(self, isbn: str, metadata: Dict[str, Any], sections: List[Dict[str, Any]]) -> bool:
+        """
+        Add an ISBN to the blacklist after successful novel processing
+
+        Args:
+            isbn: ISBN number to add
+            metadata: Complete extraction metadata
+            sections: Extracted sections
+
+        Returns:
+            True if successfully added, False otherwise
+        """
+        try:
+            # Import MongoDB manager here to avoid circular imports
+            from .mongodb_manager import MongoDBManager
+
+            mongodb_manager = MongoDBManager(debug=self.debug)
+            if not mongodb_manager.connected:
+                if self.debug:
+                    print(f"⚠️  Cannot add ISBN {isbn} to blacklist - MongoDB not available")
+                return False
+
+            # Create blacklist entry
+            blacklist_entry = {
+                'isbn': isbn,
+                'title': metadata.get('book_full_name', metadata.get('book_title', 'Unknown')),
+                'author': metadata.get('author', 'Unknown'),
+                'extraction_date': datetime.now().isoformat(),
+                'extraction_session_id': f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                'patterns_extracted': {
+                    # For now, these will be 0 since pattern extraction isn't implemented yet
+                    'physical_descriptions': 0,
+                    'dialogue': 0,
+                    'personality': 0,
+                    'behavior': 0,
+                    'voice': 0
+                },
+                'total_patterns': 0,
+                'characters_processed': len(metadata.get('character_identification', {}).get('characters', [])),
+                'characters_identified': [char['name'] for char in metadata.get('character_identification', {}).get('characters', [])],
+                'extraction_options': ['basic_extraction'],  # Will be updated when pattern extraction is implemented
+                'file_info': {
+                    'filename': metadata.get('source_file', 'unknown.pdf'),
+                    'file_size': metadata.get('file_size', 0),
+                    'page_count': metadata.get('total_pages', 0)
+                },
+                'processing_time_seconds': 0,  # Will be tracked when full novel processing is implemented
+                'status': 'completed',
+                'notes': 'Basic extraction completed - pattern extraction not yet implemented',
+                'content_type': metadata.get('content_type', 'novel'),
+                'game_metadata': {
+                    'game_type': metadata.get('game_type', 'Unknown'),
+                    'edition': metadata.get('edition', 'Unknown'),
+                    'book_type': metadata.get('book_type', 'Unknown'),
+                    'collection_name': metadata.get('collection_name', 'Unknown')
+                }
+            }
+
+            # Insert into blacklist collection
+            blacklist_collection = mongodb_manager.database['rpger.extraction.blacklist']
+            result = blacklist_collection.insert_one(blacklist_entry)
+
+            if self.debug:
+                print(f"✅ Added ISBN {isbn} to blacklist with ID: {result.inserted_id}")
+
+            return True
+
+        except Exception as e:
+            if self.debug:
+                print(f"❌ Error adding ISBN {isbn} to blacklist: {e}")
+            return False
 
     def _extract_isbn(self, doc, pdf_path: Path) -> Dict[str, Any]:
         """
@@ -413,7 +822,7 @@ class MultiGamePDFProcessor:
             Dictionary with ISBN information
         """
         isbn_data = {
-            "isbn_10": None, 
+            "isbn_10": None,
             "isbn_13": None,
             "isbn": None,  # Primary ISBN (prefers ISBN-13 if available)
             "source": None  # Where the ISBN was found (metadata or content)
@@ -450,49 +859,49 @@ class MultiGamePDFProcessor:
     def _find_isbns_in_text(self, text: str) -> Dict[str, str]:
         """
         Find ISBN-10 and ISBN-13 numbers in text
-        
+
         Args:
             text: Text content to search
-            
+
         Returns:
             Dictionary with found ISBN-10 and ISBN-13
         """
         found_isbns = {}
-        
+
         # More robust patterns for ISBN detection
         isbn_patterns = [
             # ISBN-10 with prefix
             r'ISBN(?:-10)?[:\s]+([\d][\d-]{8,}[\dXx])',
-            
+
             # ISBN-13 with prefix (specifically capturing full 13-digit pattern)
             r'ISBN-13[:\s]+([\d][\d-]{11,}[\d])',
-            
+
             # ISBN-10 without prefix (standalone)
             r'(?<!\d)([\d][\d-]{8,}[\dXx])(?!\d)',
-            
+
             # ISBN-13 without prefix (standalone)
             r'(?<!\d)([\d][\d-]{11,}[\d])(?!\d)',
         ]
-        
+
         for pattern in isbn_patterns:
             matches = re.finditer(pattern, text, re.IGNORECASE)
             for match in matches:
                 # Clean up the ISBN by removing spaces and hyphens
                 raw_isbn = match.group(1).strip()
                 clean_isbn = raw_isbn.replace('-', '').replace(' ', '')
-                
+
                 # Validate the ISBN format and checksum
                 if len(clean_isbn) == 10 and self._validate_isbn_10(clean_isbn):
                     found_isbns["isbn_10"] = clean_isbn
                 elif len(clean_isbn) == 13 and self._validate_isbn_13(clean_isbn):
                     found_isbns["isbn_13"] = clean_isbn
-        
+
         return found_isbns
 
     def _update_isbn_data(self, isbn_data: Dict[str, str], new_isbns: Dict[str, str], source: str) -> None:
         """
         Update ISBN data dictionary with new ISBNs
-        
+
         Args:
             isbn_data: Existing ISBN data dictionary to update
             new_isbns: New ISBNs found
@@ -501,16 +910,16 @@ class MultiGamePDFProcessor:
         # Update ISBN-10 and ISBN-13 if found
         if "isbn_10" in new_isbns and new_isbns["isbn_10"]:
             isbn_data["isbn_10"] = new_isbns["isbn_10"]
-            
+
         if "isbn_13" in new_isbns and new_isbns["isbn_13"]:
             isbn_data["isbn_13"] = new_isbns["isbn_13"]
-        
+
         # Set the primary ISBN (prefer ISBN-13 over ISBN-10)
         if isbn_data["isbn_13"]:
             isbn_data["isbn"] = isbn_data["isbn_13"]
         elif isbn_data["isbn_10"]:
             isbn_data["isbn"] = isbn_data["isbn_10"]
-        
+
         # Set the source if an ISBN was found
         if isbn_data["isbn"] and not isbn_data["source"]:
             isbn_data["source"] = source
@@ -518,58 +927,58 @@ class MultiGamePDFProcessor:
     def _validate_isbn_10(self, isbn: str) -> bool:
         """
         Validate an ISBN-10 number
-        
+
         Args:
             isbn: ISBN-10 string (digits only with possible 'X' at the end)
-            
+
         Returns:
             True if valid, False otherwise
         """
         if len(isbn) != 10:
             return False
-        
+
         # Check if all characters are digits or the last one is 'X'/'x'
         if not all(c.isdigit() for c in isbn[:-1]) or (isbn[-1].upper() != 'X' and not isbn[-1].isdigit()):
             return False
-        
+
         # Calculate checksum
         checksum = 0
         for i in range(9):
             checksum += (10 - i) * int(isbn[i])
-        
+
         # Handle the last digit/character
         if isbn[-1].upper() == 'X':
             checksum += 10
         else:
             checksum += int(isbn[-1])
-        
+
         # Valid if checksum is divisible by 11
         return checksum % 11 == 0
 
     def _validate_isbn_13(self, isbn: str) -> bool:
         """
         Validate an ISBN-13 number
-        
+
         Args:
             isbn: ISBN-13 string (digits only)
-            
+
         Returns:
             True if valid, False otherwise
         """
         if len(isbn) != 13:
             return False
-        
+
         # Check if all characters are digits
         if not isbn.isdigit():
             return False
-        
+
         # Calculate checksum using ISBN-13 algorithm
         checksum = 0
         for i in range(12):
             checksum += int(isbn[i]) * (1 if i % 2 == 0 else 3)
-        
+
         check_digit = (10 - (checksum % 10)) % 10
-        
+
         # Valid if calculated check digit matches the last digit
         return check_digit == int(isbn[-1])
 
@@ -599,7 +1008,7 @@ class MultiGamePDFProcessor:
             "average_words_per_page": total_words // len(sections) if sections else 0,
             "has_isbn": "isbn" in game_metadata
         }
-        
+
         # Add ISBN information if present in game_metadata
         if "isbn" in game_metadata:
             summary["isbn"] = game_metadata["isbn"]
@@ -607,7 +1016,7 @@ class MultiGamePDFProcessor:
                 summary["isbn_10"] = game_metadata["isbn_10"]
             if "isbn_13" in game_metadata:
                 summary["isbn_13"] = game_metadata["isbn_13"]
-            
+
         return summary
 
     def save_extraction(self, extraction_data: Dict, output_dir: Path) -> Dict[str, Path]:
@@ -675,7 +1084,7 @@ class MultiGamePDFProcessor:
                 "extraction_confidence": section["extraction_confidence"],
                 "processing_date": metadata["processing_date"]
             }
-            
+
             # Add ISBN information if available
             if "isbn" in metadata:
                 doc_metadata["isbn"] = metadata["isbn"]

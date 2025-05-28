@@ -3,10 +3,18 @@
 // Global variables
 let currentFile = null;
 let currentSessionId = null;
+let openRouterModels = null;
+let sessionTokens = 0;
+let sessionApiCalls = 0;
+let currentContentType = 'source_material';
+let savedSettings = {};
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
     initializeFileUpload();
+    initializeProgressTracking();
+    initializeAIProviderManagement();
+    loadSavedSettings();
     checkStatus();
 
     // Initialize temperature slider
@@ -15,6 +23,12 @@ document.addEventListener('DOMContentLoaded', function() {
         temperatureSlider.addEventListener('input', function() {
             document.getElementById('temperature-value').textContent = this.value;
         });
+    }
+
+    // Initialize content type change handler
+    const contentTypeSelect = document.getElementById('content-type');
+    if (contentTypeSelect) {
+        contentTypeSelect.addEventListener('change', onContentTypeChange);
     }
 });
 
@@ -229,6 +243,120 @@ function showAnalysisCard() {
     document.getElementById('analysis-card').scrollIntoView({ behavior: 'smooth' });
 }
 
+// Handle AI provider change
+function onProviderChange() {
+    const provider = document.getElementById('ai-provider').value;
+    const modelContainer = document.getElementById('model-selection-container');
+
+    if (provider === 'openrouter') {
+        modelContainer.style.display = 'block';
+        loadOpenRouterModels();
+    } else {
+        modelContainer.style.display = 'none';
+    }
+}
+
+// Load OpenRouter models
+async function loadOpenRouterModels(forceRefresh = false) {
+    const modelSelect = document.getElementById('ai-model');
+    const modelDescription = document.getElementById('model-description');
+
+    try {
+        // Show loading state
+        modelSelect.innerHTML = '<option value="">Loading models...</option>';
+        modelDescription.textContent = 'Loading available models...';
+
+        // Fetch models from API
+        const response = await fetch(`/api/openrouter/models?refresh=${forceRefresh}&group=true`);
+        const data = await response.json();
+
+        if (data.success) {
+            openRouterModels = data.models;
+            populateModelDropdown(data.models, data.recommended);
+            modelDescription.textContent = `${data.total_models} models available`;
+        } else {
+            throw new Error(data.error || 'Failed to load models');
+        }
+
+    } catch (error) {
+        console.error('Error loading OpenRouter models:', error);
+        modelSelect.innerHTML = '<option value="">Error loading models</option>';
+        modelDescription.textContent = 'Failed to load models. Check API key.';
+        showToast('Failed to load OpenRouter models: ' + error.message, 'error');
+    }
+}
+
+// Populate model dropdown with grouped options
+function populateModelDropdown(models, recommended = []) {
+    const modelSelect = document.getElementById('ai-model');
+    modelSelect.innerHTML = '';
+
+    // Add default option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Select a model...';
+    modelSelect.appendChild(defaultOption);
+
+    // Add recommended section first
+    if (recommended.length > 0) {
+        const recommendedGroup = document.createElement('optgroup');
+        recommendedGroup.label = '⭐ Recommended for Character Analysis';
+
+        models.filter(model => model.type === 'option' && recommended.includes(model.value))
+              .forEach(model => {
+                  const option = document.createElement('option');
+                  option.value = model.value;
+                  option.textContent = model.label;
+                  option.setAttribute('data-description', model.description);
+                  option.setAttribute('data-provider', model.provider);
+                  recommendedGroup.appendChild(option);
+              });
+
+        if (recommendedGroup.children.length > 0) {
+            modelSelect.appendChild(recommendedGroup);
+        }
+    }
+
+    // Add all models grouped by provider
+    let currentGroup = null;
+    models.forEach(model => {
+        if (model.type === 'header') {
+            currentGroup = document.createElement('optgroup');
+            currentGroup.label = model.label;
+            modelSelect.appendChild(currentGroup);
+        } else if (model.type === 'option' && currentGroup) {
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            option.setAttribute('data-description', model.description);
+            option.setAttribute('data-provider', model.provider);
+            currentGroup.appendChild(option);
+        }
+    });
+
+    // Add change event listener to show model description
+    modelSelect.addEventListener('change', function() {
+        const selectedOption = this.options[this.selectedIndex];
+        const description = selectedOption.getAttribute('data-description') || 'No description available';
+        const provider = selectedOption.getAttribute('data-provider') || '';
+
+        const modelDescription = document.getElementById('model-description');
+        if (this.value) {
+            modelDescription.textContent = `${provider}: ${description}`;
+        } else {
+            modelDescription.textContent = 'Select a model for analysis';
+        }
+    });
+}
+
+// Refresh models
+function refreshModels() {
+    const provider = document.getElementById('ai-provider').value;
+    if (provider === 'openrouter') {
+        loadOpenRouterModels(true);
+    }
+}
+
 // Analyze PDF with AI
 function analyzePDF() {
     if (!currentFile) {
@@ -239,20 +367,38 @@ function analyzePDF() {
     const aiProvider = document.getElementById('ai-provider').value;
     const contentType = document.getElementById('content-type').value;
 
+    // Get selected model for OpenRouter
+    let selectedModel = null;
+    if (aiProvider === 'openrouter') {
+        selectedModel = document.getElementById('ai-model').value;
+        if (!selectedModel) {
+            showToast('Please select a model for OpenRouter', 'error');
+            return;
+        }
+    }
+
     document.getElementById('analyze-btn').disabled = true;
     document.getElementById('analysis-progress').style.display = 'block';
     updateProgress('analyze', 'active');
+
+    // Prepare request body
+    const requestBody = {
+        filepath: currentFile.filepath,
+        ai_provider: aiProvider,
+        content_type: contentType
+    };
+
+    // Add model selection for OpenRouter
+    if (selectedModel) {
+        requestBody.ai_model = selectedModel;
+    }
 
     fetch('/analyze', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-            filepath: currentFile.filepath,
-            ai_provider: aiProvider,
-            content_type: contentType
-        })
+        body: JSON.stringify(requestBody)
     })
     .then(response => response.json())
     .then(data => {
@@ -363,7 +509,16 @@ function extractContent() {
             aggressive_cleanup: aggressiveCleanup
         })
     })
-    .then(response => response.json())
+    .then(response => {
+        // Handle different response status codes
+        if (response.status === 409) {
+            // ISBN duplicate error
+            return response.json().then(data => {
+                throw new Error(`ISBN_DUPLICATE:${JSON.stringify(data)}`);
+            });
+        }
+        return response.json();
+    })
     .then(data => {
         document.getElementById('extraction-progress').style.display = 'none';
         document.getElementById('extract-btn').disabled = false;
@@ -381,7 +536,14 @@ function extractContent() {
         console.error('Extraction error:', error);
         document.getElementById('extraction-progress').style.display = 'none';
         document.getElementById('extract-btn').disabled = false;
-        showToast('Extraction failed: ' + error.message, 'error');
+
+        // Check if this is an ISBN duplicate error
+        if (error.message.startsWith('ISBN_DUPLICATE:')) {
+            const duplicateData = JSON.parse(error.message.replace('ISBN_DUPLICATE:', ''));
+            showISBNDuplicateModal(duplicateData);
+        } else {
+            showToast('Extraction failed: ' + error.message, 'error');
+        }
     });
 }
 
@@ -389,6 +551,7 @@ function extractContent() {
 function displayExtractionResults(data) {
     const summary = data.summary;
     const textQuality = data.text_quality_metrics;
+    const characterData = data.character_identification;
 
     let resultsHtml = `
         <div class="extraction-summary">
@@ -396,8 +559,100 @@ function displayExtractionResults(data) {
             <div class="summary-stat">Words: ${(summary.total_words || 0).toLocaleString()}</div>
             <div class="summary-stat">Sections: ${data.sections_count || 0}</div>
             ${summary.isbn ? `<div class="summary-stat">ISBN: ${summary.isbn}</div>` : ''}
+            ${characterData ? `<div class="summary-stat">Characters: ${characterData.total_characters || 0}</div>` : ''}
         </div>
     `;
+
+    // Add character identification results for novels
+    if (characterData && characterData.total_characters > 0) {
+        resultsHtml += `
+            <div class="character-identification mt-3">
+                <h6><i class="fas fa-users"></i> Character Identification Results</h6>
+                <div class="character-summary mb-2">
+                    <span class="badge bg-primary">${characterData.total_characters} characters identified</span>
+                </div>
+                <div class="character-list">
+                    ${characterData.characters.map(char => `
+                        <div class="character-item">
+                            <div class="character-header">
+                                <div class="character-name">
+                                    <i class="fas fa-user"></i> <strong>${char.name}</strong>
+                                    <span class="character-type badge bg-secondary ms-2">${char.role || char.character_type || 'unknown'}</span>
+                                    ${char.age && char.age !== 'unknown' ? `<span class="character-age badge bg-info ms-1">${char.age}</span>` : ''}
+                                </div>
+                                <div class="character-confidence">
+                                    <small>Confidence: ${Math.round((char.confidence || 0) * 100)}%</small>
+                                </div>
+                            </div>
+
+                            ${char.physical_description && char.physical_description !== 'Not specified' && char.physical_description !== 'Not specified in fallback analysis' ? `
+                                <div class="character-description">
+                                    <strong>Description:</strong> <span class="text-muted">${char.physical_description}</span>
+                                </div>
+                            ` : ''}
+
+                            ${char.personality && char.personality !== 'Not specified' && char.personality !== 'Not specified in fallback analysis' ? `
+                                <div class="character-personality">
+                                    <strong>Personality:</strong> <span class="text-muted">${char.personality}</span>
+                                </div>
+                            ` : ''}
+
+                            ${char.relationships && char.relationships.length > 0 ? `
+                                <div class="character-relationships">
+                                    <strong>Relationships:</strong>
+                                    <div class="relationship-tags">
+                                        ${char.relationships.map(rel => `<span class="badge bg-light text-dark me-1">${rel}</span>`).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+
+                            ${char.background && char.background !== 'Not specified' ? `
+                                <div class="character-background">
+                                    <strong>Background:</strong> <span class="text-muted">${char.background}</span>
+                                </div>
+                            ` : ''}
+
+                            ${char.character_arc && char.character_arc !== 'Not analyzed in fallback mode' ? `
+                                <div class="character-arc">
+                                    <strong>Character Arc:</strong> <span class="text-muted">${char.character_arc}</span>
+                                </div>
+                            ` : ''}
+
+                            <div class="character-meta">
+                                <small class="text-muted">
+                                    ${char.importance ? `Importance: ${char.importance}` : ''}
+                                    ${char.mentions ? ` | Mentions: ${char.mentions}` : ''}
+                                    ${char.enhanced ? ' | Enhanced Profile' : ''}
+                                </small>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+                ${characterData.processing_stages ? `
+                    <div class="character-processing-info mt-2">
+                        <small class="text-muted">
+                            <i class="fas fa-info-circle"></i>
+                            Processing: ${characterData.processing_stages.discovery?.status || 'unknown'} →
+                            ${characterData.processing_stages.validation?.status || 'unknown'}
+                        </small>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    } else if (characterData && characterData.total_characters === 0) {
+        resultsHtml += `
+            <div class="character-identification mt-3">
+                <h6><i class="fas fa-users"></i> Character Identification Results</h6>
+                <div class="alert alert-info">
+                    <i class="fas fa-info-circle"></i> No characters were identified in this novel.
+                    ${characterData.processing_stages?.error ?
+                        `<br><small>Error: ${characterData.processing_stages.error}</small>` :
+                        '<br><small>This may be due to the content type or text structure.</small>'
+                    }
+                </div>
+            </div>
+        `;
+    }
 
     // Add text quality metrics if available
     if (textQuality && textQuality.enabled) {
@@ -1447,6 +1702,65 @@ function togglePasswordVisibility(fieldId) {
     }
 }
 
+// Show ISBN duplicate modal
+function showISBNDuplicateModal(duplicateData) {
+    const modalHtml = `
+        <div class="modal fade" id="isbnDuplicateModal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header bg-warning text-dark">
+                        <h5 class="modal-title">
+                            <i class="fas fa-exclamation-triangle"></i> ${duplicateData.title || 'Novel Already Processed'}
+                        </h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-warning">
+                            <strong>Duplicate Detection:</strong> ${duplicateData.details || 'This novel has already been processed.'}
+                        </div>
+
+                        <div class="duplicate-info">
+                            <h6><i class="fas fa-info-circle"></i> Processing Details:</h6>
+                            <p>${duplicateData.message || 'No additional details available.'}</p>
+                        </div>
+
+                        <div class="mt-3">
+                            <small class="text-muted">
+                                <strong>Why this happens:</strong> Each novel can only be extracted once to prevent duplicate patterns
+                                in the database. This ensures the quality and uniqueness of the pattern library.
+                            </small>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                            <i class="fas fa-times"></i> Close
+                        </button>
+                        <button type="button" class="btn btn-primary" onclick="browseMongoDB(); bootstrap.Modal.getInstance(document.getElementById('isbnDuplicateModal')).hide();">
+                            <i class="fas fa-database"></i> View Database
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    // Remove existing modal if any
+    const existingModal = document.getElementById('isbnDuplicateModal');
+    if (existingModal) {
+        existingModal.remove();
+    }
+
+    // Add modal to page
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('isbnDuplicateModal'));
+    modal.show();
+
+    // Show warning toast as well
+    showToast('Novel already processed - ISBN duplicate detected', 'warning');
+}
+
 // Utility function to format file size
 function formatFileSize(bytes) {
     if (bytes === 0) return '0 Bytes';
@@ -1454,4 +1768,321 @@ function formatFileSize(bytes) {
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// ===== ENHANCED PROGRESS TRACKING =====
+
+function initializeProgressTracking() {
+    // Initialize collapsible progress steps
+    const progressSteps = document.querySelectorAll('.progress-step[data-toggle="collapse"]');
+    progressSteps.forEach(step => {
+        step.addEventListener('click', function() {
+            const target = this.getAttribute('data-target');
+            const collapse = document.querySelector(target);
+            if (collapse) {
+                const isExpanded = this.getAttribute('aria-expanded') === 'true';
+                this.setAttribute('aria-expanded', !isExpanded);
+                collapse.classList.toggle('show');
+            }
+        });
+    });
+
+    // Initialize token tracking
+    updateTokenDisplay();
+}
+
+function onContentTypeChange() {
+    const contentType = document.getElementById('content-type').value;
+    currentContentType = contentType;
+
+    // Show appropriate progress track
+    const sourceProgress = document.getElementById('source-progress');
+    const novelProgress = document.getElementById('novel-progress');
+
+    if (contentType === 'novel') {
+        sourceProgress.style.display = 'none';
+        novelProgress.style.display = 'block';
+        document.body.classList.add('novel-processing');
+    } else {
+        sourceProgress.style.display = 'block';
+        novelProgress.style.display = 'none';
+        document.body.classList.remove('novel-processing');
+    }
+
+    // Reset progress
+    resetProgress();
+}
+
+function updateNovelProgress(stage, status, details = {}) {
+    const stepId = `novel-step-${stage}`;
+    const step = document.getElementById(stepId);
+
+    if (!step) return;
+
+    // Update step status
+    step.classList.remove('active', 'completed', 'error');
+    step.classList.add(status);
+
+    // Update step details based on stage
+    switch (stage) {
+        case 'discovery':
+            updateDiscoveryProgress(details);
+            break;
+        case 'filtering':
+            updateFilteringProgress(details);
+            break;
+        case 'analysis':
+            updateAnalysisProgress(details);
+            break;
+    }
+}
+
+function updateDiscoveryProgress(details) {
+    if (details.chunks_processed !== undefined) {
+        document.getElementById('chunks-processed').textContent = details.chunks_processed;
+    }
+    if (details.total_chunks !== undefined) {
+        document.getElementById('total-chunks').textContent = details.total_chunks;
+    }
+    if (details.candidates_found !== undefined) {
+        document.getElementById('candidates-found').textContent = details.candidates_found;
+    }
+}
+
+function updateFilteringProgress(details) {
+    if (details.candidates_filtered !== undefined) {
+        document.getElementById('candidates-filtered').textContent = details.candidates_filtered;
+    }
+    if (details.filter_ratio !== undefined) {
+        document.getElementById('filter-ratio').textContent = Math.round(details.filter_ratio * 100) + '%';
+    }
+}
+
+function updateAnalysisProgress(details) {
+    if (details.current_character !== undefined) {
+        document.getElementById('current-character').textContent = details.current_character;
+    }
+    if (details.characters_confirmed !== undefined) {
+        document.getElementById('characters-confirmed').textContent = details.characters_confirmed;
+    }
+}
+
+function updateTokenDisplay() {
+    document.getElementById('session-tokens').textContent = sessionTokens.toLocaleString();
+    document.getElementById('session-api-calls').textContent = sessionApiCalls;
+}
+
+function addTokenUsage(tokens, apiCalls = 1) {
+    sessionTokens += tokens;
+    sessionApiCalls += apiCalls;
+    updateTokenDisplay();
+}
+
+function resetProgress() {
+    // Reset all progress steps
+    const allSteps = document.querySelectorAll('.progress-step');
+    allSteps.forEach(step => {
+        step.classList.remove('active', 'completed', 'error');
+    });
+
+    // Reset token counters for new session
+    sessionTokens = 0;
+    sessionApiCalls = 0;
+    updateTokenDisplay();
+
+    // Reset progress details
+    document.getElementById('chunks-processed').textContent = '0';
+    document.getElementById('total-chunks').textContent = '0';
+    document.getElementById('candidates-found').textContent = '0';
+    document.getElementById('candidates-filtered').textContent = '0';
+    document.getElementById('filter-ratio').textContent = '0%';
+    document.getElementById('current-character').textContent = '-';
+    document.getElementById('characters-confirmed').textContent = '0';
+}
+
+// ===== AI PROVIDER MANAGEMENT =====
+
+function initializeAIProviderManagement() {
+    // Filter AI providers to only show those with API keys
+    filterAvailableProviders();
+
+    // Set up provider change handler
+    const providerSelect = document.getElementById('ai-provider');
+    if (providerSelect) {
+        providerSelect.addEventListener('change', onProviderChangeEnhanced);
+    }
+}
+
+async function filterAvailableProviders() {
+    try {
+        const response = await fetch('/api/providers/available');
+        const data = await response.json();
+
+        if (data.success) {
+            const providerSelect = document.getElementById('ai-provider');
+            const currentOptions = Array.from(providerSelect.options);
+
+            // Remove providers that don't have API keys
+            currentOptions.forEach(option => {
+                if (option.value && !data.available_providers.includes(option.value)) {
+                    option.remove();
+                }
+            });
+
+            // Auto-select last used provider if available
+            if (savedSettings.lastProvider && data.available_providers.includes(savedSettings.lastProvider)) {
+                providerSelect.value = savedSettings.lastProvider;
+                onProviderChangeEnhanced();
+            }
+        }
+    } catch (error) {
+        console.error('Error filtering providers:', error);
+    }
+}
+
+function onProviderChangeEnhanced() {
+    const provider = document.getElementById('ai-provider').value;
+    const modelContainer = document.getElementById('model-selection-container');
+
+    // Save provider preference
+    savedSettings.lastProvider = provider;
+    saveSettings();
+
+    if (provider === 'openrouter') {
+        modelContainer.style.display = 'block';
+        loadOpenRouterModelsEnhanced();
+    } else {
+        modelContainer.style.display = 'none';
+    }
+}
+
+async function loadOpenRouterModelsEnhanced(forceRefresh = false) {
+    const modelSelect = document.getElementById('ai-model');
+    const modelDescription = document.getElementById('model-description');
+
+    try {
+        // Show loading state
+        modelSelect.innerHTML = '<option value="">Loading models...</option>';
+        modelDescription.textContent = 'Loading available models...';
+
+        // Fetch models from API
+        const response = await fetch(`/api/openrouter/models?refresh=${forceRefresh}&group=true`);
+        const data = await response.json();
+
+        if (data.success) {
+            openRouterModels = data.models;
+            populateModelDropdownEnhanced(data.models, data.recommended);
+            modelDescription.textContent = `${data.total_models} models available`;
+
+            // Auto-select last used model if available
+            if (savedSettings.lastModel) {
+                modelSelect.value = savedSettings.lastModel;
+                // Trigger change event to update description
+                modelSelect.dispatchEvent(new Event('change'));
+            }
+        } else {
+            throw new Error(data.error || 'Failed to load models');
+        }
+
+    } catch (error) {
+        console.error('Error loading OpenRouter models:', error);
+        modelSelect.innerHTML = '<option value="">Error loading models</option>';
+        modelDescription.textContent = 'Failed to load models. Check API key.';
+        showToast('Failed to load OpenRouter models: ' + error.message, 'error');
+    }
+}
+
+function populateModelDropdownEnhanced(models, recommended = []) {
+    const modelSelect = document.getElementById('ai-model');
+    modelSelect.innerHTML = '';
+
+    // Add default option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Select a model...';
+    modelSelect.appendChild(defaultOption);
+
+    // Add recommended section first
+    if (recommended.length > 0) {
+        const recommendedGroup = document.createElement('optgroup');
+        recommendedGroup.label = '⭐ Recommended for Character Analysis';
+
+        models.filter(model => model.type === 'option' && recommended.includes(model.value))
+              .forEach(model => {
+                  const option = document.createElement('option');
+                  option.value = model.value;
+                  option.textContent = model.label;
+                  option.setAttribute('data-description', model.description);
+                  option.setAttribute('data-provider', model.provider);
+                  recommendedGroup.appendChild(option);
+              });
+
+        if (recommendedGroup.children.length > 0) {
+            modelSelect.appendChild(recommendedGroup);
+        }
+    }
+
+    // Add all models grouped by provider
+    let currentGroup = null;
+    models.forEach(model => {
+        if (model.type === 'header') {
+            currentGroup = document.createElement('optgroup');
+            currentGroup.label = model.label;
+            modelSelect.appendChild(currentGroup);
+        } else if (model.type === 'option' && currentGroup) {
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            option.setAttribute('data-description', model.description);
+            option.setAttribute('data-provider', model.provider);
+            currentGroup.appendChild(option);
+        }
+    });
+
+    // Add change event listener to show model description and save preference
+    modelSelect.addEventListener('change', function() {
+        const selectedOption = this.options[this.selectedIndex];
+        const description = selectedOption.getAttribute('data-description') || 'No description available';
+        const provider = selectedOption.getAttribute('data-provider') || '';
+
+        const modelDescription = document.getElementById('model-description');
+        if (this.value) {
+            modelDescription.textContent = `${provider}: ${description}`;
+            // Save model preference
+            savedSettings.lastModel = this.value;
+            saveSettings();
+        } else {
+            modelDescription.textContent = 'Select a model for analysis';
+        }
+    });
+}
+
+// ===== SETTINGS MANAGEMENT =====
+
+function loadSavedSettings() {
+    try {
+        const saved = localStorage.getItem('extractorSettings');
+        if (saved) {
+            savedSettings = JSON.parse(saved);
+        }
+    } catch (error) {
+        console.error('Error loading saved settings:', error);
+        savedSettings = {};
+    }
+}
+
+function saveSettings() {
+    try {
+        localStorage.setItem('extractorSettings', JSON.stringify(savedSettings));
+    } catch (error) {
+        console.error('Error saving settings:', error);
+    }
+}
+
+// ===== CHUNK MANAGEMENT UI =====
+
+function showChunkManagementModal() {
+    // TODO: Implement chunk management modal
+    // This would show saved text chunks with options to delete them
+    showToast('Chunk management feature coming soon', 'info');
 }

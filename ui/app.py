@@ -24,6 +24,7 @@ from Modules.ai_categorizer import AICategorizer
 from Modules.pdf_processor import MultiGamePDFProcessor
 from Modules.multi_collection_manager import MultiGameCollectionManager
 from Modules.mongodb_manager import MongoDBManager
+from Modules.openrouter_models import openrouter_models
 
 app = Flask(__name__)
 app.secret_key = 'extraction_v3_ui_secret_key_change_in_production'
@@ -104,6 +105,115 @@ def index():
     """Main dashboard page"""
     return render_template('index.html')
 
+@app.route('/api/providers/available')
+def get_available_providers():
+    """Get list of AI providers that have API keys configured"""
+    try:
+        available_providers = []
+
+        # Check each provider for API key availability
+        if os.getenv('OPENROUTER_API_KEY'):
+            available_providers.append('openrouter')
+
+        if os.getenv('ANTHROPIC_API_KEY'):
+            available_providers.append('anthropic')
+
+        if os.getenv('OPENAI_API_KEY'):
+            available_providers.append('openai')
+
+        if os.getenv('LOCAL_LLM_URL'):
+            available_providers.append('local')
+
+        # Always include mock for testing
+        available_providers.append('mock')
+
+        return jsonify({
+            'success': True,
+            'available_providers': available_providers,
+            'total_providers': len(available_providers)
+        })
+
+    except Exception as e:
+        logger.error(f"Error checking available providers: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/openrouter/models', methods=['GET'])
+def get_openrouter_models():
+    """Get available OpenRouter models for dropdown selection"""
+    try:
+        force_refresh = request.args.get('refresh', 'false').lower() == 'true'
+        group_by_provider = request.args.get('group', 'true').lower() == 'true'
+
+        # Get models from OpenRouter
+        if group_by_provider:
+            models = openrouter_models.get_dropdown_options(group_by_provider=True)
+        else:
+            models = openrouter_models.get_dropdown_options(group_by_provider=False)
+
+        # Get recommended models for character identification
+        recommended = openrouter_models.get_recommended_models("character_identification")
+        recommended_ids = [model["id"] for model in recommended]
+
+        return jsonify({
+            'success': True,
+            'models': models,
+            'recommended': recommended_ids,
+            'total_models': len([m for m in models if m.get('type') == 'option']),
+            'cache_info': {
+                'cached': openrouter_models._is_cache_valid(),
+                'cache_age': (datetime.now() - openrouter_models._cache_timestamp).total_seconds() if openrouter_models._cache_timestamp else None
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching OpenRouter models: {e}")
+
+        # Return fallback models
+        fallback_models = [
+            {
+                "type": "header",
+                "label": "Anthropic",
+                "value": "header_anthropic"
+            },
+            {
+                "type": "option",
+                "value": "anthropic/claude-3.5-sonnet",
+                "label": "Claude 3.5 Sonnet (anthropic)",
+                "description": "Anthropic's most capable model",
+                "provider": "anthropic"
+            },
+            {
+                "type": "header",
+                "label": "OpenAI",
+                "value": "header_openai"
+            },
+            {
+                "type": "option",
+                "value": "openai/gpt-4o",
+                "label": "GPT-4o (openai)",
+                "description": "OpenAI's flagship multimodal model",
+                "provider": "openai"
+            },
+            {
+                "type": "option",
+                "value": "openai/gpt-4o-mini",
+                "label": "GPT-4o Mini (openai)",
+                "description": "Faster, cheaper GPT-4o",
+                "provider": "openai"
+            }
+        ]
+
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'models': fallback_models,
+            'recommended': ["anthropic/claude-3.5-sonnet", "openai/gpt-4o"],
+            'fallback': True
+        })
+
 @app.route('/upload', methods=['POST'])
 def upload_file():
     """Handle PDF file upload with improved timeout handling"""
@@ -171,6 +281,7 @@ def analyze_pdf():
         data = request.get_json()
         filepath = data.get('filepath')
         ai_provider = data.get('ai_provider', 'mock')
+        ai_model = data.get('ai_model')  # For OpenRouter model selection
         content_type = data.get('content_type', 'source_material')
         run_confidence_test = data.get('run_confidence_test', True)
 
@@ -205,6 +316,10 @@ def analyze_pdf():
             'max_tokens': 4000     # Stay within Claude's limits (4096 max)
         }
 
+        # Add model selection for OpenRouter
+        if ai_model and ai_provider == 'openrouter':
+            ai_config['model'] = ai_model
+
         detector = AIGameDetector(ai_config)
 
         # Analyze the PDF
@@ -215,9 +330,35 @@ def analyze_pdf():
 
         # Perform AI analysis
         game_metadata = detector.analyze_game_metadata(Path(filepath))
-        
+
         # Add content type to game metadata
         game_metadata['content_type'] = content_type
+
+        # Extract ISBN during analysis phase for display in UI
+        try:
+            import fitz
+            doc = fitz.open(filepath)
+
+            # Use the same ISBN extraction logic as the PDF processor
+            from Modules.pdf_processor import MultiGamePDFProcessor
+            temp_processor = MultiGamePDFProcessor(debug=True)
+            isbn_data = temp_processor._extract_isbn(doc, Path(filepath))
+
+            # Add ISBN data to game metadata for UI display
+            if isbn_data.get('isbn'):
+                game_metadata['isbn'] = isbn_data['isbn']
+            if isbn_data.get('isbn_10'):
+                game_metadata['isbn_10'] = isbn_data['isbn_10']
+            if isbn_data.get('isbn_13'):
+                game_metadata['isbn_13'] = isbn_data['isbn_13']
+            if isbn_data.get('source'):
+                game_metadata['isbn_source'] = isbn_data['source']
+
+            doc.close()
+
+        except Exception as e:
+            logger.warning(f"Failed to extract ISBN during analysis: {e}")
+            # Continue without ISBN - not critical for analysis
 
         # Add confidence information to game metadata
         if confidence_results:
@@ -322,17 +463,43 @@ def extract_pdf():
             'extraction_time': datetime.now().isoformat()
         }
 
-        return jsonify({
+        # Prepare response data
+        response_data = {
             'success': True,
             'summary': summary,
             'sections_count': len(sections),
             'text_quality_metrics': text_quality_metrics,
             'ready_for_import': True
-        })
+        }
+
+        # Add character identification results for novels
+        if game_metadata.get('content_type') == 'novel' and 'character_identification' in game_metadata:
+            character_data = game_metadata['character_identification']
+            response_data['character_identification'] = {
+                'total_characters': character_data.get('total_characters', 0),
+                'characters': character_data.get('characters', []),
+                'processing_stages': character_data.get('processing_stages', {})
+            }
+
+        return jsonify(response_data)
 
     except Exception as e:
         logger.error(f"Extraction error: {e}")
-        return jsonify({'error': str(e)}), 500
+
+        # Check if this is an ISBN duplicate error
+        error_str = str(e)
+        if error_str.startswith("ISBN_DUPLICATE:"):
+            # Extract the duplicate information from the error message
+            duplicate_info = error_str.replace("ISBN_DUPLICATE: ", "")
+            return jsonify({
+                'error': 'ISBN_DUPLICATE',
+                'error_type': 'isbn_duplicate',
+                'message': duplicate_info,
+                'title': 'Novel Already Processed',
+                'details': 'This novel has already been processed. Each novel can only be extracted once to prevent duplicate patterns in the database.'
+            }), 409  # 409 Conflict status code
+        else:
+            return jsonify({'error': str(e)}), 500
 
 @app.route('/import_chroma', methods=['POST'])
 def import_to_chroma():

@@ -40,6 +40,8 @@ class AIGameDetector:
             return self._initialize_openai_client()
         elif provider in ["claude", "anthropic"]:
             return self._initialize_anthropic_client()
+        elif provider == "openrouter":
+            return self._initialize_openrouter_client()
         elif provider == "local":
             return self._initialize_local_client()
         else:
@@ -83,6 +85,23 @@ class AIGameDetector:
 
         except ImportError:
             print("⚠️  Anthropic package not installed. Run: pip install anthropic")
+            return MockAIClient(self.ai_config)
+
+    def _initialize_openrouter_client(self):
+        """Initialize OpenRouter client"""
+        try:
+            import openai
+
+            # Get API key from config or environment
+            api_key = self.ai_config.get("api_key") or os.getenv("OPENROUTER_API_KEY")
+            if not api_key:
+                print("⚠️  OpenRouter API key not found. Set OPENROUTER_API_KEY environment variable or use --ai-api-key")
+                return MockAIClient(self.ai_config)
+
+            return OpenRouterClient(api_key, self.ai_config)
+
+        except ImportError:
+            print("⚠️  OpenAI package not installed (required for OpenRouter). Run: pip install openai")
             return MockAIClient(self.ai_config)
 
     def _initialize_local_client(self):
@@ -323,6 +342,10 @@ Provide your analysis as valid JSON only, no additional text.
     def _normalize_game_type(self, game_type: str) -> str:
         """Normalize game type names to standard format"""
 
+        # Handle None or empty game_type
+        if not game_type:
+            return "Unknown"
+
         game_type_lower = game_type.lower()
 
         # Common normalizations
@@ -352,6 +375,10 @@ Provide your analysis as valid JSON only, no additional text.
     def _generate_collection_prefix(self, game_type: str) -> str:
         """Generate collection prefix from game type"""
 
+        # Handle None or empty game_type
+        if not game_type:
+            return "unknown"
+
         prefix_map = {
             "D&D": "dnd",
             "Pathfinder": "pf",
@@ -373,9 +400,10 @@ Provide your analysis as valid JSON only, no additional text.
         prefix = metadata.get("collection_prefix", "unknown")
         edition = metadata.get("edition", "unknown")
         book_type = metadata.get("book_type", "core")
+        content_type = metadata.get("content_type", "source_material")
 
         # Handle None values and clean up strings
-        if edition is None:
+        if edition is None or (isinstance(edition, str) and edition.lower() in ["unknown", "n/a", "none"]):
             edition = "unknown"
         else:
             edition = str(edition).replace(".", "").lower()
@@ -385,7 +413,14 @@ Provide your analysis as valid JSON only, no additional text.
         else:
             book_type = str(book_type).lower()
 
-        return f"{prefix}_{edition}_{book_type}"
+        # Special handling for novels - they don't have meaningful editions
+        if content_type == "novel":
+            # For novels, use a simpler naming scheme: prefix_novel
+            # This avoids issues with "N/A" editions and meaningless book types
+            return f"{prefix}_novel"
+        else:
+            # For source material, use the traditional scheme
+            return f"{prefix}_{edition}_{book_type}"
 
     def _fallback_analysis(self, content: Dict[str, Any]) -> Dict[str, Any]:
         """Fallback analysis when AI fails"""
@@ -557,6 +592,67 @@ class LocalLLMClient:
             "game_type": "Unknown",
             "confidence": 0.1,
             "reasoning": "Local LLM error, using fallback"
+        }
+
+
+class OpenRouterClient:
+    """OpenRouter API client for game detection"""
+
+    def __init__(self, api_key: str, ai_config: Dict[str, Any]):
+        import openai
+        self.client = openai.OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1"
+        )
+        self.ai_config = ai_config
+        self.model = ai_config.get("model", "anthropic/claude-3.5-sonnet")
+        self.max_tokens = ai_config.get("max_tokens", 4000)
+        self.temperature = ai_config.get("temperature", 0.1)
+        self.timeout = ai_config.get("timeout", 30)
+
+    def analyze(self, prompt: str) -> Dict[str, Any]:
+        """Analyze content using OpenRouter API"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "You are an expert RPG book analyzer. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=self.max_tokens,
+                temperature=self.temperature,
+                timeout=self.timeout,
+                response_format={"type": "json_object"}
+            )
+
+            # Check if response has content
+            if not response.choices or len(response.choices) == 0:
+                print(f"❌ OpenRouter API returned no choices")
+                return self._fallback_response()
+
+            content = response.choices[0].message.content
+            if not content or not content.strip():
+                print(f"❌ OpenRouter API returned empty content")
+                return self._fallback_response()
+
+            return json.loads(content)
+
+        except json.JSONDecodeError as e:
+            print(f"❌ OpenRouter API JSON parse error: {e}")
+            return self._fallback_response()
+        except Exception as e:
+            print(f"❌ OpenRouter API error: {e}")
+            return self._fallback_response()
+
+    def categorize(self, prompt: str) -> Dict[str, Any]:
+        """Categorize content using OpenRouter API"""
+        return self.analyze(prompt)  # Same method for both operations
+
+    def _fallback_response(self) -> Dict[str, Any]:
+        return {
+            "game_type": "Unknown",
+            "confidence": 0.1,
+            "reasoning": "OpenRouter API error, using fallback"
         }
 
 

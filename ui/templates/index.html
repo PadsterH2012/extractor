@@ -63,16 +63,29 @@
                     </div>
                     <div class="card-body">
                         <div class="row mb-3">
-                            <div class="col-md-4">
+                            <div class="col-md-3">
                                 <label for="ai-provider" class="form-label">AI Provider</label>
-                                <select class="form-select" id="ai-provider">
+                                <select class="form-select" id="ai-provider" onchange="onProviderChange()">
                                     <option value="mock">Mock AI (Immediate)</option>
                                     <option value="claude">Claude AI (Recommended)</option>
                                     <option value="openai">OpenAI GPT-4</option>
+                                    <option value="openrouter">OpenRouter (300+ Models)</option>
                                     <option value="local">Local LLM</option>
                                 </select>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-3" id="model-selection-container" style="display: none;">
+                                <label for="ai-model" class="form-label">
+                                    Model
+                                    <button class="btn btn-link btn-sm p-0" onclick="refreshModels()" title="Refresh model list">
+                                        <i class="fas fa-sync-alt"></i>
+                                    </button>
+                                </label>
+                                <select class="form-select" id="ai-model">
+                                    <option value="">Loading models...</option>
+                                </select>
+                                <small class="text-muted" id="model-description">Select a model for analysis</small>
+                            </div>
+                            <div class="col-md-3">
                                 <label for="content-type" class="form-label">Content Type</label>
                                 <select class="form-select" id="content-type">
                                     <option value="source_material">Source Material</option>
@@ -80,7 +93,7 @@
                                 </select>
                                 <small class="text-muted">Select content type for optimal extraction</small>
                             </div>
-                            <div class="col-md-4 d-flex align-items-end">
+                            <div class="col-md-3 d-flex align-items-end">
                                 <button class="btn btn-success" id="analyze-btn" onclick="analyzePDF()">
                                     <i class="fas fa-search"></i> Analyze PDF
                                 </button>
@@ -326,17 +339,86 @@
                         </h6>
                     </div>
                     <div class="card-body">
-                        <div class="progress-step" id="step-upload">
-                            <i class="fas fa-circle text-muted"></i> Upload PDF
+                        <!-- Source Material Progress -->
+                        <div id="source-progress" class="progress-track">
+                            <div class="progress-step" id="step-upload">
+                                <i class="fas fa-circle text-muted"></i> Upload PDF
+                            </div>
+                            <div class="progress-step" id="step-analyze">
+                                <i class="fas fa-circle text-muted"></i> AI Analysis
+                            </div>
+                            <div class="progress-step" id="step-extract">
+                                <i class="fas fa-circle text-muted"></i> Content Extraction
+                            </div>
+                            <div class="progress-step" id="step-import">
+                                <i class="fas fa-circle text-muted"></i> Database Import
+                            </div>
                         </div>
-                        <div class="progress-step" id="step-analyze">
-                            <i class="fas fa-circle text-muted"></i> AI Analysis
+
+                        <!-- Novel Progress -->
+                        <div id="novel-progress" class="progress-track" style="display: none;">
+                            <div class="progress-step" id="novel-step-upload">
+                                <i class="fas fa-circle text-muted"></i> Upload Novel
+                            </div>
+                            <div class="progress-step" id="novel-step-analyze">
+                                <i class="fas fa-circle text-muted"></i> Text Analysis
+                            </div>
+                            <div class="progress-step" id="novel-step-discovery" data-toggle="collapse" data-target="#discovery-details">
+                                <i class="fas fa-circle text-muted"></i> Character Discovery
+                                <div class="collapse" id="discovery-details">
+                                    <div class="progress-substep">
+                                        <small class="text-muted">Chunks: <span id="chunks-processed">0</span>/<span id="total-chunks">0</span></small>
+                                    </div>
+                                    <div class="progress-substep">
+                                        <small class="text-muted">Candidates: <span id="candidates-found">0</span></small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="progress-step" id="novel-step-filtering" data-toggle="collapse" data-target="#filtering-details">
+                                <i class="fas fa-circle text-muted"></i> Filtering Candidates
+                                <div class="collapse" id="filtering-details">
+                                    <div class="progress-substep">
+                                        <small class="text-muted">Filtered: <span id="candidates-filtered">0</span></small>
+                                    </div>
+                                    <div class="progress-substep">
+                                        <small class="text-muted">Filter ratio: <span id="filter-ratio">0%</span></small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="progress-step" id="novel-step-analysis" data-toggle="collapse" data-target="#analysis-details">
+                                <i class="fas fa-circle text-muted"></i> Character Analysis
+                                <div class="collapse" id="analysis-details">
+                                    <div class="progress-substep">
+                                        <small class="text-muted">Analyzing: <span id="current-character">-</span></small>
+                                    </div>
+                                    <div class="progress-substep">
+                                        <small class="text-muted">Confirmed: <span id="characters-confirmed">0</span></small>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="progress-step" id="novel-step-complete">
+                                <i class="fas fa-circle text-muted"></i> Complete
+                            </div>
                         </div>
-                        <div class="progress-step" id="step-extract">
-                            <i class="fas fa-circle text-muted"></i> Content Extraction
-                        </div>
-                        <div class="progress-step" id="step-import">
-                            <i class="fas fa-circle text-muted"></i> Database Import
+
+                        <!-- Token Usage Tracker -->
+                        <div class="mt-3 pt-3 border-top">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <small class="text-muted">
+                                    <i class="fas fa-coins"></i> Session Tokens
+                                </small>
+                                <small class="text-muted">
+                                    <span id="session-tokens">0</span> tokens
+                                </small>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <small class="text-muted">
+                                    <i class="fas fa-phone"></i> API Calls
+                                </small>
+                                <small class="text-muted">
+                                    <span id="session-api-calls">0</span> calls
+                                </small>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -395,6 +477,16 @@
                                     </button>
                                 </div>
                                 <small class="text-muted">For OpenAI GPT-4 provider</small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">OpenRouter API Key</label>
+                                <div class="input-group">
+                                    <input type="password" class="form-control" id="openrouter-api-key" placeholder="sk-or-...">
+                                    <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('openrouter-api-key')">
+                                        <i class="fas fa-eye"></i>
+                                    </button>
+                                </div>
+                                <small class="text-muted">For OpenRouter (300+ models from multiple providers)</small>
                             </div>
                             <div class="mb-3">
                                 <label class="form-label">Local LLM URL</label>

@@ -52,11 +52,13 @@ body {
     100% { opacity: 0.1; }
 }
 
-/* Progress Steps */
+/* Enhanced Progress Steps */
 .progress-step {
     padding: 8px 0;
     font-size: 14px;
     transition: all 0.3s ease;
+    cursor: pointer;
+    position: relative;
 }
 
 .progress-step.completed i {
@@ -71,6 +73,153 @@ body {
 .progress-step.error i {
     color: #dc3545 !important;
     animation: pulse-error 1.5s infinite;
+}
+
+/* Progress Track Styles */
+.progress-track {
+    transition: all 0.3s ease;
+}
+
+/* Progress Substeps */
+.progress-substep {
+    margin-left: 20px;
+    margin-top: 4px;
+    padding: 2px 0;
+    font-size: 12px;
+    color: #6c757d;
+    transition: all 0.3s ease;
+}
+
+/* Collapsible Progress Steps */
+.progress-step[data-toggle="collapse"] {
+    position: relative;
+}
+
+.progress-step[data-toggle="collapse"]:after {
+    content: "▶";
+    position: absolute;
+    right: 0;
+    font-size: 10px;
+    transition: transform 0.3s ease;
+    color: #6c757d;
+}
+
+.progress-step[data-toggle="collapse"][aria-expanded="true"]:after {
+    transform: rotate(90deg);
+}
+
+.progress-step[data-toggle="collapse"]:hover:after {
+    color: #0d6efd;
+}
+
+/* Collapse Animation */
+.collapse.show .progress-substep {
+    animation: fadeInUp 0.3s ease;
+}
+
+@keyframes fadeInUp {
+    from {
+        opacity: 0;
+        transform: translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Token Usage Tracker */
+.token-tracker {
+    border-top: 1px solid #dee2e6;
+    padding-top: 12px;
+    margin-top: 12px;
+}
+
+.token-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.token-stat i {
+    margin-right: 6px;
+    width: 14px;
+    text-align: center;
+}
+
+.token-value {
+    font-weight: 600;
+    color: #495057;
+}
+
+/* Novel Progress Specific Styles */
+#novel-progress .progress-step {
+    border-left: 3px solid transparent;
+    padding-left: 12px;
+    margin-left: -15px;
+    transition: all 0.3s ease;
+}
+
+#novel-progress .progress-step.active {
+    border-left-color: #0d6efd;
+    background-color: rgba(13, 110, 253, 0.05);
+    border-radius: 0 6px 6px 0;
+}
+
+#novel-progress .progress-step.completed {
+    border-left-color: #198754;
+}
+
+#novel-progress .progress-step.error {
+    border-left-color: #dc3545;
+}
+
+/* Character Discovery Progress */
+.character-discovery-progress {
+    background: linear-gradient(135deg, #e7f3ff 0%, #f0f8ff 100%);
+    border: 1px solid #b3d9ff;
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 8px;
+}
+
+.discovery-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+    font-size: 13px;
+}
+
+.discovery-label {
+    color: #495057;
+    font-weight: 500;
+}
+
+.discovery-value {
+    color: #0d6efd;
+    font-weight: 600;
+}
+
+/* Progress Animation for Novel Processing */
+.novel-processing .progress-step.active i {
+    animation: novelPulse 2s infinite;
+}
+
+@keyframes novelPulse {
+    0% {
+        color: #0d6efd;
+        transform: scale(1);
+    }
+    50% {
+        color: #0a58ca;
+        transform: scale(1.1);
+    }
+    100% {
+        color: #0d6efd;
+        transform: scale(1);
+    }
 }
 
 @keyframes pulse {
@@ -320,6 +469,127 @@ body {
     padding: 2px 8px;
     border-radius: 12px;
     font-weight: 600;
+}
+
+/* Character Identification Styles */
+.character-identification {
+    background-color: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    color: #0c5460;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 15px;
+}
+
+.character-identification h6 {
+    color: #0c5460;
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+
+.character-summary {
+    margin-bottom: 15px;
+}
+
+.character-list {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.character-item {
+    background-color: rgba(255, 255, 255, 0.7);
+    border: 1px solid #b3d9ff;
+    border-radius: 6px;
+    padding: 12px;
+    margin-bottom: 8px;
+    transition: all 0.3s ease;
+}
+
+.character-item:hover {
+    background-color: rgba(255, 255, 255, 0.9);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.character-name {
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.character-name strong {
+    margin-left: 6px;
+    margin-right: 8px;
+    color: #0c5460;
+}
+
+.character-type {
+    font-size: 0.75rem;
+    text-transform: capitalize;
+}
+
+.character-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 4px;
+}
+
+.character-confidence {
+    font-size: 0.8rem;
+    color: #6c757d;
+}
+
+.character-processing-info {
+    border-top: 1px solid #b3d9ff;
+    padding-top: 8px;
+    margin-top: 12px;
+}
+
+/* Enhanced Character Display */
+.character-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+}
+
+.character-age {
+    font-size: 0.7rem;
+}
+
+.character-description,
+.character-personality,
+.character-relationships,
+.character-background,
+.character-arc {
+    margin-bottom: 6px;
+    font-size: 0.9rem;
+}
+
+.character-description strong,
+.character-personality strong,
+.character-relationships strong,
+.character-background strong,
+.character-arc strong {
+    color: #0c5460;
+    font-size: 0.85rem;
+}
+
+.relationship-tags {
+    margin-top: 4px;
+}
+
+.relationship-tags .badge {
+    font-size: 0.7rem;
+    margin-bottom: 2px;
+}
+
+.character-meta {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(179, 217, 255, 0.5);
+    font-size: 0.8rem;
 }
 
 /* Copy Button Styles */

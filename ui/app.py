@@ -1126,6 +1126,141 @@ def query_game_edition():
         logger.error(f"Game edition query error: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/mongodb/collections/<collection_name>/deletion-info', methods=['GET'])
+def get_collection_deletion_info(collection_name):
+    """Get information needed for safe collection deletion"""
+    try:
+        mongodb_manager = MongoDBManager()
+
+        if not mongodb_manager.connected:
+            return jsonify({'success': False, 'error': 'MongoDB not connected'}), 500
+
+        # Get collection metadata
+        collection_info = mongodb_manager.get_collection_info(collection_name)
+        if not collection_info:
+            return jsonify({'success': False, 'error': 'Collection not found'}), 404
+
+        # Check safety constraints
+        safety_check = mongodb_manager.check_deletion_safety(collection_name)
+
+        # Get recent activity (simplified - just document count for now)
+        recent_activity = {
+            'last_modified': 'Unknown',  # MongoDB doesn't easily track this
+            'recent_changes': 0
+        }
+
+        return jsonify({
+            'success': True,
+            'collection_info': {
+                'name': collection_info['name'],
+                'document_count': collection_info['document_count'],
+                'size_bytes': collection_info['size'],
+                'storage_size': collection_info['storage_size'],
+                'indexes': collection_info['indexes']
+            },
+            'safety_check': safety_check,
+            'recent_activity': recent_activity,
+            'estimated_backup_size': collection_info['size']
+        })
+
+    except Exception as e:
+        logger.error(f"Error getting collection deletion info: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/mongodb/collections/<collection_name>/delete', methods=['POST'])
+def delete_mongodb_collection(collection_name):
+    """Delete a MongoDB collection with safety checks"""
+    try:
+        data = request.get_json()
+        confirmation_name = data.get('confirmation_name', '')
+        create_backup = data.get('create_backup', True)
+        admin_password = data.get('admin_password', '')
+
+        # Validate request
+        if not confirmation_name or confirmation_name != collection_name:
+            return jsonify({
+                'success': False,
+                'error': 'Collection name confirmation does not match'
+            }), 400
+
+        # TODO: Check admin privileges (if implemented)
+        # For now, we'll skip admin password validation
+
+        mongodb_manager = MongoDBManager()
+
+        if not mongodb_manager.connected:
+            return jsonify({'success': False, 'error': 'MongoDB not connected'}), 500
+
+        # Safety checks
+        safety_result = mongodb_manager.check_deletion_safety(collection_name)
+        if not safety_result['safe_to_delete']:
+            return jsonify({
+                'success': False,
+                'error': f'Collection deletion blocked: {safety_result["reason"]}'
+            }), 400
+
+        # Create backup if requested
+        backup_path = None
+        if create_backup:
+            backup_result = mongodb_manager.create_collection_backup(collection_name)
+            if backup_result['success']:
+                backup_path = backup_result['backup_path']
+                logger.info(f"Backup created: {backup_path}")
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': f'Backup creation failed: {backup_result["error"]}'
+                }), 500
+
+        # Perform deletion
+        deletion_result = mongodb_manager.delete_collection_safe(collection_name)
+
+        if not deletion_result['success']:
+            return jsonify({
+                'success': False,
+                'error': f'Deletion failed: {deletion_result["error"]}'
+            }), 500
+
+        # Log the deletion
+        log_collection_deletion(collection_name, backup_path, request.remote_addr)
+
+        return jsonify({
+            'success': True,
+            'message': f'Collection "{collection_name}" deleted successfully',
+            'backup_created': backup_path is not None,
+            'backup_path': backup_path,
+            'documents_deleted': deletion_result['documents_deleted']
+        })
+
+    except Exception as e:
+        logger.error(f"Error deleting collection {collection_name}: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Deletion failed: {str(e)}'
+        }), 500
+
+def log_collection_deletion(collection_name: str, backup_path: str, user_ip: str):
+    """Log collection deletion for audit purposes"""
+    try:
+        log_entry = {
+            'action': 'collection_deletion',
+            'collection_name': collection_name,
+            'timestamp': datetime.now().isoformat() + 'Z',
+            'backup_created': backup_path is not None,
+            'backup_path': backup_path,
+            'user_ip': user_ip,
+            'user_agent': request.headers.get('User-Agent', '')
+        }
+
+        # Store in audit log collection
+        mongodb_manager = MongoDBManager()
+        if mongodb_manager.connected:
+            audit_collection = mongodb_manager.database['rpger.system.audit_log']
+            audit_collection.insert_one(log_entry)
+            logger.info(f"Logged collection deletion: {collection_name}")
+    except Exception as e:
+        logger.error(f"Failed to log collection deletion: {e}")
+
 @app.route('/get_settings', methods=['GET'])
 def get_settings():
     """Get current settings from .env file"""

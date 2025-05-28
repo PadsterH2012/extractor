@@ -1291,3 +1291,130 @@ body {
     color: #6c757d;
     margin-top: 2px;
 }
+
+/* Collection Deletion Styles */
+.collection-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+.collection-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.collection-delete-btn {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    padding: 2px 6px;
+    font-size: 0.75rem;
+    border-radius: 3px;
+}
+
+.collection-item:hover .collection-delete-btn {
+    opacity: 1;
+}
+
+.collection-delete-btn:hover {
+    background-color: #dc3545;
+    border-color: #dc3545;
+    color: white;
+    transform: scale(1.05);
+}
+
+/* Deletion Modal Steps */
+.deletion-step {
+    min-height: 300px;
+}
+
+.deletion-step h6 {
+    margin-bottom: 15px;
+}
+
+.collection-info {
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 15px;
+}
+
+.collection-info .row > div {
+    margin-bottom: 8px;
+}
+
+/* Deletion Progress */
+#deletion-progress {
+    margin-top: 20px;
+}
+
+#deletion-progress .progress {
+    height: 8px;
+    border-radius: 4px;
+}
+
+#deletion-status {
+    display: block;
+    text-align: center;
+    margin-top: 8px;
+    font-style: italic;
+}
+
+/* Deletion Results */
+#deletion-result .alert {
+    margin-bottom: 0;
+}
+
+#deletion-result ul {
+    margin-top: 10px;
+    padding-left: 20px;
+}
+
+/* Protected Collection Indicator */
+.collection-item .text-muted {
+    font-size: 0.8rem;
+    margin-top: 4px;
+}
+
+.collection-item .text-muted i {
+    margin-right: 4px;
+    color: #6c757d;
+}
+
+/* Modal Header Styling */
+.modal-header.bg-danger {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.modal-header.bg-danger .modal-title {
+    font-weight: 600;
+}
+
+/* Confirmation Input Styling */
+#confirmationInput {
+    font-family: 'Courier New', monospace;
+    font-weight: 600;
+}
+
+#confirmationInput:focus {
+    border-color: #dc3545;
+    box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
+}
+
+/* Safety Warning Animations */
+.alert-danger, .alert-warning {
+    animation: fadeInDown 0.3s ease;
+}
+
+@keyframes fadeInDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

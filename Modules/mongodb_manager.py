@@ -493,6 +493,130 @@ class MongoDBManager:
                 print(f"❌ {error_msg}")
             return False, error_msg
 
+    def check_deletion_safety(self, collection_name: str) -> Dict[str, Any]:
+        """Check if collection is safe to delete"""
+        if not self.connected:
+            return {'safe_to_delete': False, 'reason': 'Database not connected'}
+
+        # Define protected collections
+        protected_collections = [
+            'rpger.system.config',
+            'rpger.system.users',
+            'rpger.system.audit_log'
+        ]
+
+        if collection_name in protected_collections:
+            return {
+                'safe_to_delete': False,
+                'reason': 'System collection cannot be deleted'
+            }
+
+        # Check if collection was created recently (within 24 hours)
+        collection = self.database[collection_name]
+        try:
+            stats = self.database.command('collStats', collection_name)
+            created_date = stats.get('createdDate')
+            if created_date:
+                hours_since_creation = (datetime.now(timezone.utc) - created_date).total_seconds() / 3600
+                if hours_since_creation < 24:
+                    return {
+                        'safe_to_delete': False,
+                        'reason': f'Collection created {hours_since_creation:.1f} hours ago. Wait 24 hours before deletion.'
+                    }
+        except:
+            pass  # If we can't get creation date, allow deletion
+
+        # Check collection size (warn for large collections)
+        document_count = collection.count_documents({})
+        if document_count > 10000:
+            return {
+                'safe_to_delete': True,
+                'reason': f'Large collection ({document_count:,} documents). Backup strongly recommended.',
+                'warning': True
+            }
+
+        return {'safe_to_delete': True, 'reason': 'Collection is safe to delete'}
+
+    def create_collection_backup(self, collection_name: str) -> Dict[str, Any]:
+        """Create a backup of the collection before deletion"""
+        if not self.connected:
+            return {'success': False, 'error': 'Database not connected'}
+
+        try:
+            from pathlib import Path
+            import json
+
+            # Create backup directory
+            backup_dir = Path('backups') / 'collections'
+            backup_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate backup filename with timestamp
+            timestamp = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+            backup_filename = f'{collection_name}_{timestamp}.json'
+            backup_path = backup_dir / backup_filename
+
+            # Export collection data
+            collection = self.database[collection_name]
+            documents = list(collection.find({}))
+
+            # Convert ObjectId to string for JSON serialization
+            for doc in documents:
+                if '_id' in doc:
+                    doc['_id'] = str(doc['_id'])
+
+            # Create backup metadata
+            backup_data = {
+                'backup_info': {
+                    'collection_name': collection_name,
+                    'backup_date': datetime.now(timezone.utc).isoformat() + 'Z',
+                    'document_count': len(documents),
+                    'backup_version': '1.0'
+                },
+                'documents': documents
+            }
+
+            # Write backup file
+            with open(backup_path, 'w', encoding='utf-8') as f:
+                json.dump(backup_data, f, indent=2, ensure_ascii=False)
+
+            return {
+                'success': True,
+                'backup_path': str(backup_path),
+                'document_count': len(documents),
+                'backup_size': backup_path.stat().st_size
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Backup creation failed: {str(e)}'
+            }
+
+    def delete_collection_safe(self, collection_name: str) -> Dict[str, Any]:
+        """Safely delete a collection with logging"""
+        if not self.connected:
+            return {'success': False, 'error': 'Database not connected'}
+
+        try:
+            # Get final collection stats before deletion
+            collection = self.database[collection_name]
+            final_count = collection.count_documents({})
+
+            # Perform deletion
+            collection.drop()
+
+            return {
+                'success': True,
+                'documents_deleted': final_count,
+                'deletion_time': datetime.now(timezone.utc).isoformat() + 'Z'
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f'Collection deletion failed: {str(e)}'
+            }
+
     def close(self):
         """Close MongoDB connection"""
         if self.client:

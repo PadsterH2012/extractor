@@ -1332,30 +1332,50 @@ function generateCollectionItems(collections, dbKey) {
         const collectionType = getCollectionType(col.name);
         const icon = getCollectionIcon(collectionType);
         const hierarchicalPath = getHierarchicalPath(col.name);
+        const isProtected = isProtectedCollection(col.name);
 
         return `
-            <div class="collection-item" data-name="${col.name.toLowerCase()}"
-                 onclick="selectCollection(this, '${dbKey}', '${col.name}')">
+            <div class="collection-item" data-name="${col.name.toLowerCase()}">
                 <div class="p-3">
                     <div class="collection-header">
-                        <div class="collection-name">
+                        <div class="collection-name" onclick="selectCollection(this.closest('.collection-item'), '${dbKey}', '${col.name}')">
                             <div class="collection-icon ${collectionType}">
                                 <i class="fas ${icon}"></i>
                             </div>
                             ${formatCollectionName(col.name)}
                         </div>
-                        <span class="collection-count">${col.document_count || 0}</span>
+                        <div class="collection-actions">
+                            <span class="collection-count">${col.document_count || 0}</span>
+                            ${dbKey === 'mongodb' && !isProtected ? `
+                                <button type="button" class="btn btn-sm btn-outline-danger collection-delete-btn"
+                                        onclick="event.stopPropagation(); showCollectionDeletionModal('${col.name}')"
+                                        title="Delete Collection">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            ` : ''}
+                        </div>
                     </div>
 
                     <div class="collection-meta">
                         ${col.game_type ? `<div><strong>Game:</strong> ${col.game_type}</div>` : ''}
                         ${col.sample_fields ? `<div><strong>Fields:</strong> ${col.sample_fields.slice(0,3).join(', ')}</div>` : ''}
                         <div class="collection-path">${hierarchicalPath}</div>
+                        ${isProtected ? '<div class="text-muted"><i class="fas fa-shield-alt"></i> Protected Collection</div>' : ''}
                     </div>
                 </div>
             </div>
         `;
     }).join('');
+}
+
+// Check if collection is protected from deletion
+function isProtectedCollection(collectionName) {
+    const protectedCollections = [
+        'rpger.system.config',
+        'rpger.system.users',
+        'rpger.system.audit_log'
+    ];
+    return protectedCollections.includes(collectionName);
 }
 
 // Get collection type from name
@@ -2167,4 +2187,254 @@ function showChunkManagementModal() {
     // TODO: Implement chunk management modal
     // This would show saved text chunks with options to delete them
     showToast('Chunk management feature coming soon', 'info');
+}
+
+// ===== COLLECTION DELETION FUNCTIONALITY =====
+
+let currentDeletionCollection = null;
+
+// Initialize collection deletion modal handlers
+document.addEventListener('DOMContentLoaded', function() {
+    initializeCollectionDeletion();
+});
+
+function initializeCollectionDeletion() {
+    // Step navigation handlers
+    document.getElementById('proceedToConfirmation')?.addEventListener('click', function() {
+        showDeletionStep(2);
+    });
+
+    document.getElementById('backToStep1')?.addEventListener('click', function() {
+        showDeletionStep(1);
+    });
+
+    // Confirmation input handler
+    document.getElementById('confirmationInput')?.addEventListener('input', function() {
+        const confirmBtn = document.getElementById('confirmDeletion');
+        const isValid = this.value === currentDeletionCollection;
+        confirmBtn.disabled = !isValid;
+
+        if (isValid) {
+            confirmBtn.classList.remove('btn-danger');
+            confirmBtn.classList.add('btn-danger');
+        }
+    });
+
+    // Final deletion handler
+    document.getElementById('confirmDeletion')?.addEventListener('click', function() {
+        performCollectionDeletion();
+    });
+
+    // Modal reset handler
+    document.getElementById('deleteCollectionModal')?.addEventListener('hidden.bs.modal', function() {
+        resetDeletionModal();
+    });
+}
+
+function showCollectionDeletionModal(collectionName) {
+    currentDeletionCollection = collectionName;
+
+    // Reset modal to step 1
+    showDeletionStep(1);
+
+    // Load collection information
+    loadCollectionDeletionInfo(collectionName);
+
+    // Show modal
+    const modal = new bootstrap.Modal(document.getElementById('deleteCollectionModal'));
+    modal.show();
+}
+
+async function loadCollectionDeletionInfo(collectionName) {
+    try {
+        const response = await fetch(`/api/mongodb/collections/${encodeURIComponent(collectionName)}/deletion-info`);
+        const data = await response.json();
+
+        if (data.success) {
+            populateCollectionInfo(data);
+        } else {
+            showToast('Failed to load collection information: ' + data.error, 'error');
+        }
+    } catch (error) {
+        console.error('Error loading collection deletion info:', error);
+        showToast('Failed to load collection information', 'error');
+    }
+}
+
+function populateCollectionInfo(data) {
+    const info = data.collection_info;
+    const safety = data.safety_check;
+
+    // Populate basic info
+    document.getElementById('delete-collection-name').textContent = info.name;
+    document.getElementById('delete-document-count').textContent = info.document_count.toLocaleString();
+    document.getElementById('delete-collection-size').textContent = formatFileSize(info.size_bytes);
+    document.getElementById('delete-storage-size').textContent = formatFileSize(info.storage_size);
+    document.getElementById('delete-index-count').textContent = info.indexes;
+    document.getElementById('delete-backup-size').textContent = formatFileSize(data.estimated_backup_size);
+
+    // Set confirmation collection name
+    document.getElementById('confirmation-collection-name').textContent = info.name;
+
+    // Show safety warnings
+    const warningsContainer = document.getElementById('safety-warnings');
+    warningsContainer.innerHTML = '';
+
+    if (!safety.safe_to_delete) {
+        const alert = document.createElement('div');
+        alert.className = 'alert alert-danger';
+        alert.innerHTML = `
+            <h6><i class="fas fa-ban me-2"></i>Deletion Blocked</h6>
+            <p class="mb-0">${safety.reason}</p>
+        `;
+        warningsContainer.appendChild(alert);
+
+        // Disable proceed button
+        document.getElementById('proceedToConfirmation').disabled = true;
+    } else if (safety.warning) {
+        const alert = document.createElement('div');
+        alert.className = 'alert alert-warning';
+        alert.innerHTML = `
+            <h6><i class="fas fa-exclamation-triangle me-2"></i>Warning</h6>
+            <p class="mb-0">${safety.reason}</p>
+        `;
+        warningsContainer.appendChild(alert);
+    }
+}
+
+function showDeletionStep(step) {
+    // Hide all steps
+    for (let i = 1; i <= 4; i++) {
+        const stepElement = document.getElementById(`deletion-step-${i}`);
+        if (stepElement) {
+            stepElement.style.display = 'none';
+        }
+    }
+
+    // Show target step
+    const targetStep = document.getElementById(`deletion-step-${step}`);
+    if (targetStep) {
+        targetStep.style.display = 'block';
+    }
+
+    // Reset confirmation input when going to step 2
+    if (step === 2) {
+        document.getElementById('confirmationInput').value = '';
+        document.getElementById('confirmDeletion').disabled = true;
+    }
+}
+
+async function performCollectionDeletion() {
+    showDeletionStep(3);
+
+    const createBackup = document.getElementById('createBackupCheck').checked;
+    const confirmationName = document.getElementById('confirmationInput').value;
+    const adminPassword = document.getElementById('adminPasswordInput').value;
+
+    try {
+        // Update progress
+        updateDeletionProgress(25, 'Validating request...');
+
+        const response = await fetch(`/api/mongodb/collections/${encodeURIComponent(currentDeletionCollection)}/delete`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                confirmation_name: confirmationName,
+                create_backup: createBackup,
+                admin_password: adminPassword
+            })
+        });
+
+        updateDeletionProgress(50, 'Processing deletion...');
+
+        const data = await response.json();
+
+        updateDeletionProgress(75, 'Finalizing...');
+
+        // Small delay for UX
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        updateDeletionProgress(100, 'Complete');
+
+        // Show results
+        showDeletionResults(data);
+
+    } catch (error) {
+        console.error('Deletion error:', error);
+        showDeletionResults({
+            success: false,
+            error: 'Network error: ' + error.message
+        });
+    }
+}
+
+function updateDeletionProgress(percentage, status) {
+    const progressBar = document.querySelector('#deletion-progress .progress-bar');
+    const statusText = document.getElementById('deletion-status');
+
+    if (progressBar) {
+        progressBar.style.width = percentage + '%';
+    }
+
+    if (statusText) {
+        statusText.textContent = status;
+    }
+}
+
+function showDeletionResults(data) {
+    showDeletionStep(4);
+
+    const resultContainer = document.getElementById('deletion-result');
+
+    if (data.success) {
+        resultContainer.innerHTML = `
+            <div class="alert alert-success">
+                <h6><i class="fas fa-check-circle me-2"></i>Collection Deleted Successfully</h6>
+                <p class="mb-2">${data.message}</p>
+                <ul class="mb-0">
+                    <li>Documents deleted: ${data.documents_deleted.toLocaleString()}</li>
+                    ${data.backup_created ? `<li>Backup created: ${data.backup_path}</li>` : '<li>No backup created</li>'}
+                </ul>
+            </div>
+        `;
+
+        // Refresh database browser if open
+        if (document.getElementById('database-browser-content').innerHTML.trim()) {
+            browseMongoDB();
+        }
+
+        showToast('Collection deleted successfully', 'success');
+    } else {
+        resultContainer.innerHTML = `
+            <div class="alert alert-danger">
+                <h6><i class="fas fa-times-circle me-2"></i>Deletion Failed</h6>
+                <p class="mb-0">${data.error}</p>
+            </div>
+        `;
+
+        showToast('Collection deletion failed: ' + data.error, 'error');
+    }
+}
+
+function resetDeletionModal() {
+    currentDeletionCollection = null;
+
+    // Reset all form inputs
+    document.getElementById('confirmationInput').value = '';
+    document.getElementById('adminPasswordInput').value = '';
+    document.getElementById('createBackupCheck').checked = true;
+
+    // Reset progress
+    updateDeletionProgress(0, 'Preparing deletion...');
+
+    // Clear warnings
+    document.getElementById('safety-warnings').innerHTML = '';
+
+    // Re-enable proceed button
+    document.getElementById('proceedToConfirmation').disabled = false;
+
+    // Reset to step 1
+    showDeletionStep(1);
 }

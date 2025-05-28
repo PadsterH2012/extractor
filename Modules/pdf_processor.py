@@ -735,6 +735,7 @@ class MultiGamePDFProcessor:
             "collection_name": game_metadata["collection_name"],
             "publisher": game_metadata.get("publisher", "Unknown"),
             "publication_year": game_metadata.get("publication_year"),
+            "content_type": game_metadata.get("content_type", "source_material"),  # Add content type
 
             # Source information
             "source": f"{game_metadata.get('game_full_name', game_metadata['game_type'])} {game_metadata['edition']} Edition - {game_metadata.get('book_full_name', 'Unknown Book')}",

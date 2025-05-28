@@ -246,7 +246,8 @@ class TextQualityEnhancer:
 
             if clean_word and clean_word not in self.spell_checker:
                 # Get suggestions
-                suggestions = list(self.spell_checker.candidates(clean_word))
+                candidates = self.spell_checker.candidates(clean_word)
+                suggestions = list(candidates) if candidates else []
 
                 if suggestions:
                     best_suggestion = suggestions[0]

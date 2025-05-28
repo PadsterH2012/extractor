@@ -6,10 +6,14 @@ Query and display the building blocks extracted from novels for procedural NPC g
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Any, List
 import pymongo
 from pymongo import MongoClient
+
+# Update path for archive location
+sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 def query_building_blocks_from_json(json_file: str) -> Dict[str, Any]:
     """Query building blocks from extraction results JSON file"""

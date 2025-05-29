@@ -902,7 +902,7 @@ function refreshTokenTracking() {
     fetch(`/status?session_id=${currentSessionId}`)
     .then(response => response.json())
     .then(data => {
-        if (data.token_tracking && data.token_tracking.total_tokens > 0) {
+        if (data.token_tracking && (data.token_tracking.total_tokens > 0 || data.token_tracking.total_api_calls > 0)) {
             console.log('🔄 Refreshed token tracking:', data.token_tracking);
             sessionTokens = data.token_tracking.total_tokens;
             sessionApiCalls = data.token_tracking.total_api_calls;
@@ -1768,7 +1768,7 @@ function checkStatus() {
         displaySystemStatus(data);
 
         // Update token tracking if available
-        if (data.token_tracking && data.token_tracking.total_tokens > 0) {
+        if (data.token_tracking && (data.token_tracking.total_tokens > 0 || data.token_tracking.total_api_calls > 0)) {
             console.log('📊 Real-time token tracking:', data.token_tracking);
             sessionTokens = data.token_tracking.total_tokens;
             sessionApiCalls = data.token_tracking.total_api_calls;

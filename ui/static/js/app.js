@@ -546,6 +546,11 @@ async function loadOpenRouterModels(forceRefresh = false) {
             openRouterModels = data.models;
             populateModelDropdown(data.models, data.recommended);
             modelDescription.textContent = `${data.total_models} models available`;
+            
+            // Refresh token tracking if this was a forced refresh (API call made)
+            if (forceRefresh) {
+                setTimeout(refreshTokenTracking, 500);
+            }
         } else {
             throw new Error(data.error || 'Failed to load models');
         }
@@ -659,6 +664,11 @@ async function loadMainOpenRouterModels(forceRefresh = false) {
             // Update hidden input for compatibility
             const selectedModel = modelSelect.value;
             document.getElementById('ai-model').value = selectedModel;
+            
+            // Refresh token tracking if this was a forced refresh (API call made)
+            if (forceRefresh) {
+                setTimeout(refreshTokenTracking, 500);
+            }
         } else {
             throw new Error(data.error || 'Failed to load models');
         }
@@ -872,6 +882,9 @@ function recalculateSessionCost() {
         console.log('💰 Recalculated session cost:', sessionCost);
         updateSessionTracking();
     }
+    
+    // Also refresh token tracking from server to get latest data
+    refreshTokenTracking();
 }
 
 // Update session tracking display
@@ -3054,6 +3067,11 @@ async function loadOpenRouterModelsEnhanced(forceRefresh = false) {
                 modelSelect.value = savedSettings.lastModel;
                 // Trigger change event to update description
                 modelSelect.dispatchEvent(new Event('change'));
+            }
+            
+            // Refresh token tracking if this was a forced refresh (API call made)
+            if (forceRefresh) {
+                setTimeout(refreshTokenTracking, 500);
             }
         } else {
             throw new Error(data.error || 'Failed to load models');

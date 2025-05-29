@@ -21,10 +21,17 @@ class OpenRouterModels:
         self.cache_duration = cache_duration  # Cache for 1 hour by default
         self.logger = logging.getLogger(__name__)
         self.base_url = "https://openrouter.ai/api/v1"
-        
+
         # Cache for models
         self._models_cache = None
         self._cache_timestamp = None
+
+        # Session tracking for API calls
+        self._current_session_id = None
+
+    def set_session_tracking(self, session_id: str):
+        """Set session ID for token tracking"""
+        self._current_session_id = session_id
 
     def get_models(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """
@@ -66,17 +73,32 @@ class OpenRouterModels:
 
     def _fetch_models_from_api(self) -> List[Dict[str, Any]]:
         """Fetch models from OpenRouter API"""
-        
+
         url = f"{self.base_url}/models"
         headers = {}
-        
+
         # Add API key if available (not required for model listing)
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
-        
+
+        # Record API call for token tracking (models API doesn't use tokens but we track for completeness)
+        if self._current_session_id:
+            from Modules.token_usage_tracker import get_tracker
+            tracker = get_tracker()
+            tracker.record_api_call(
+                session_id=self._current_session_id,
+                provider="openrouter",
+                model="models_api",
+                operation="list_models",
+                prompt_tokens=0,  # Models API doesn't use tokens
+                completion_tokens=0,
+                cost=0.0
+            )
+            self.logger.info(f"📊 OpenRouter models API call recorded for session: {self._current_session_id[:8]}")
+
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
-        
+
         data = response.json()
         models = data.get("data", [])
         
@@ -237,7 +259,8 @@ class OpenRouterModels:
             "label": f"{model['name']} ({model['provider']})",
             "description": model.get("description", "")[:100] + "..." if len(model.get("description", "")) > 100 else model.get("description", ""),
             "provider": model["provider"],
-            "type": model.get("model_type", "basic")
+            "type": model.get("model_type", "basic"),
+            "pricing": model.get("pricing", {})
         }
 
     def get_dropdown_options(self, group_by_provider: bool = True) -> List[Dict[str, Any]]:

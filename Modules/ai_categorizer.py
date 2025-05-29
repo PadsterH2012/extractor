@@ -6,6 +6,7 @@ Uses AI to dynamically categorize content based on context and game system
 
 import json
 import logging
+import re
 from typing import Dict, List, Any, Optional
 
 class AICategorizer:
@@ -19,8 +20,26 @@ class AICategorizer:
         # Initialize AI client with configuration
         self.ai_client = self._initialize_ai_client()
 
+        # Token tracking attributes
+        self._current_session_id = None
+        self._pricing_data = None
+
         # Category cache for performance
         self.category_cache = {}
+
+        # Batch processing settings
+        self.batch_size = 5  # Process 5 pages at once
+        self.use_batching = True
+
+        # Performance optimization settings
+        self.enable_smart_caching = True
+        self.cache_hit_count = 0
+        self.total_requests = 0
+
+    def set_session_tracking(self, session_id: str, pricing_data: Dict = None):
+        """Set session ID and pricing data for token tracking"""
+        self._current_session_id = session_id
+        self._pricing_data = pricing_data
 
     def _initialize_ai_client(self):
         """Initialize AI client based on configuration"""
@@ -88,18 +107,85 @@ class AICategorizer:
             Dictionary with category, confidence, and reasoning
         """
 
+        # Performance tracking
+        self.total_requests += 1
+
         # Check cache first
         cache_key = self._generate_cache_key(content, game_metadata)
         if cache_key in self.category_cache:
+            self.cache_hit_count += 1
+            cache_hit_rate = (self.cache_hit_count / self.total_requests) * 100
+            if self.debug:
+                print(f"🔄 Cache hit! Rate: {cache_hit_rate:.1f}% ({self.cache_hit_count}/{self.total_requests})")
             return self.category_cache[cache_key]
 
         # Perform AI categorization
+        if self.debug:
+            cache_hit_rate = (self.cache_hit_count / self.total_requests) * 100
+            print(f"🤖 AI categorization needed. Cache rate: {cache_hit_rate:.1f}% ({self.cache_hit_count}/{self.total_requests})")
+
         result = self._perform_ai_categorization(content, game_metadata)
 
         # Cache result
         self.category_cache[cache_key] = result
 
         return result
+
+    def categorize_batch(self, content_list: List[str], game_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Categorize multiple content pieces in a single API call for better performance"""
+
+        if not content_list:
+            return []
+
+        # Check cache for all items first
+        results = []
+        uncached_indices = []
+        uncached_content = []
+
+        for i, content in enumerate(content_list):
+            cache_key = self._generate_cache_key(content, game_metadata)
+            if cache_key in self.category_cache:
+                results.append(self.category_cache[cache_key])
+                if self.debug:
+                    print(f"🔄 Using cached categorization for batch item {i+1}")
+            else:
+                results.append(None)  # Placeholder
+                uncached_indices.append(i)
+                uncached_content.append(content)
+
+        # Process uncached items in batch
+        if uncached_content:
+            if self.debug:
+                print(f"🔄 Batch categorizing {len(uncached_content)} items")
+
+            batch_results = self._perform_batch_categorization(uncached_content, game_metadata)
+
+            # Fill in the results and cache them
+            for idx, result in zip(uncached_indices, batch_results):
+                results[idx] = result
+                cache_key = self._generate_cache_key(content_list[idx], game_metadata)
+                self.category_cache[cache_key] = result
+
+        return results
+
+    def _perform_batch_categorization(self, content_list: List[str], game_metadata: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Perform AI-based batch categorization for multiple content pieces"""
+
+        # Temporary workaround: Use smart fallback categorization for now
+        # TODO: Fix Claude API categorization response parsing
+        if self.ai_config.get("provider") in ["claude", "anthropic"]:
+            if self.debug:
+                print("🔄 Using smart fallback categorization for Claude (temporary)")
+            return [self._smart_fallback_categorization(content, game_metadata) for content in content_list]
+
+        # Build batch categorization prompt
+        prompt = self._build_batch_categorization_prompt(content_list, game_metadata)
+
+        # Get AI analysis
+        ai_response = self.ai_client.categorize(prompt)
+
+        # Parse and validate response
+        return self._parse_batch_categorization_response(ai_response, game_metadata, len(content_list))
 
     def _perform_ai_categorization(self, content: str, game_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Perform AI-based categorization"""
@@ -119,6 +205,77 @@ class AICategorizer:
 
         # Parse and validate response
         return self._parse_categorization_response(ai_response, game_metadata)
+
+    def _parse_batch_categorization_response(self, ai_response: Any, game_metadata: Dict[str, Any], expected_count: int) -> List[Dict[str, Any]]:
+        """Parse and validate AI batch categorization response"""
+
+        try:
+            # Handle empty or None responses
+            if not ai_response:
+                self.logger.warning("AI returned empty response for batch categorization")
+                return [self._fallback_categorization(game_metadata) for _ in range(expected_count)]
+
+            # Handle string responses
+            if isinstance(ai_response, str):
+                if not ai_response.strip():
+                    self.logger.warning("AI returned empty string for batch categorization")
+                    return [self._fallback_categorization(game_metadata) for _ in range(expected_count)]
+
+                try:
+                    result = json.loads(ai_response)
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Failed to parse AI batch categorization JSON: {e}")
+                    return [self._fallback_categorization(game_metadata) for _ in range(expected_count)]
+            else:
+                result = ai_response
+
+            # Validate that result is a list
+            if not isinstance(result, list):
+                self.logger.error(f"AI batch categorization result is not a list: {type(result)}")
+                return [self._fallback_categorization(game_metadata) for _ in range(expected_count)]
+
+            # Validate count matches expected
+            if len(result) != expected_count:
+                self.logger.warning(f"AI returned {len(result)} results, expected {expected_count}")
+                # Pad or truncate as needed
+                while len(result) < expected_count:
+                    result.append(self._fallback_categorization(game_metadata))
+                result = result[:expected_count]
+
+            # Validate each result
+            validated_results = []
+            for i, item in enumerate(result):
+                if not isinstance(item, dict):
+                    self.logger.warning(f"Batch item {i+1} is not a dictionary, using fallback")
+                    validated_results.append(self._fallback_categorization(game_metadata))
+                    continue
+
+                # Validate and set defaults for each item
+                validated = {
+                    "primary_category": item.get("primary_category", "General"),
+                    "secondary_categories": item.get("secondary_categories", []),
+                    "confidence": float(item.get("confidence", 0.5)),
+                    "reasoning": item.get("reasoning", "AI batch categorization"),
+                    "key_topics": item.get("key_topics", []),
+                    "game_specific_elements": item.get("game_specific_elements", []),
+                    "content_type": item.get("content_type", "description"),
+                    "categorization_method": "ai_batch_analysis"
+                }
+
+                # Ensure confidence is in valid range
+                if not 0.0 <= validated["confidence"] <= 1.0:
+                    validated["confidence"] = 0.5
+
+                validated_results.append(validated)
+
+            return validated_results
+
+        except Exception as e:
+            self.logger.error(f"Failed to parse AI batch categorization: {e}")
+            if self.debug:
+                import traceback
+                self.logger.error(f"Full traceback: {traceback.format_exc()}")
+            return [self._fallback_categorization(game_metadata) for _ in range(expected_count)]
 
     def _build_categorization_prompt(self, content: str, game_metadata: Dict[str, Any]) -> str:
         """Build AI prompt for content categorization"""
@@ -171,6 +328,79 @@ Provide your analysis in JSON format:
 }}
 
 Focus on accuracy and provide confidence scores based on how clearly the content fits the category.
+"""
+
+        return prompt
+
+    def _build_batch_categorization_prompt(self, content_list: List[str], game_metadata: Dict[str, Any]) -> str:
+        """Build AI prompt for batch content categorization"""
+
+        # Truncate each content piece if too long
+        max_content_per_item = 800  # Smaller per item to fit multiple in one prompt
+        truncated_content = []
+
+        for i, content in enumerate(content_list):
+            if len(content) > max_content_per_item:
+                content = content[:max_content_per_item] + "..."
+            truncated_content.append(f"CONTENT {i+1}:\n{content}")
+
+        combined_content = "\n\n".join(truncated_content)
+
+        prompt = f"""
+You are an expert in {game_metadata['game_type']} {game_metadata['edition']} Edition content analysis.
+
+GAME CONTEXT:
+- Game System: {game_metadata['game_type']}
+- Edition: {game_metadata['edition']}
+- Book Type: {game_metadata['book_type']}
+- Publisher: {game_metadata.get('publisher', 'Unknown')}
+
+BATCH CONTENT TO CATEGORIZE:
+{combined_content}
+
+Analyze each content piece and determine the most appropriate category for each. Consider the game system's unique characteristics and terminology.
+
+For {game_metadata['game_type']} {game_metadata['edition']}, typical categories might include:
+
+GENERAL CATEGORIES (applicable to most RPGs):
+- Character Creation
+- Combat Rules
+- Magic/Spells
+- Equipment/Items
+- Skills/Abilities
+- Rules/Mechanics
+- Tables/Charts
+- Lore/Setting
+- NPCs/Characters
+- Adventures/Scenarios
+
+GAME-SPECIFIC CATEGORIES:
+{self._get_game_specific_categories(game_metadata)}
+
+Provide your analysis in JSON format as an array of categorization objects:
+[
+    {{
+        "primary_category": "Most appropriate category name for content 1",
+        "secondary_categories": ["List of other relevant categories"],
+        "confidence": 0.95,
+        "reasoning": "Brief explanation of categorization decision",
+        "key_topics": ["List of main topics/concepts found"],
+        "game_specific_elements": ["Game-specific terminology or mechanics identified"],
+        "content_type": "Type of content (rules, description, table, example, etc.)"
+    }},
+    {{
+        "primary_category": "Most appropriate category name for content 2",
+        "secondary_categories": ["List of other relevant categories"],
+        "confidence": 0.95,
+        "reasoning": "Brief explanation of categorization decision",
+        "key_topics": ["List of main topics/concepts found"],
+        "game_specific_elements": ["Game-specific terminology or mechanics identified"],
+        "content_type": "Type of content (rules, description, table, example, etc.)"
+    }}
+]
+
+Focus on accuracy and provide confidence scores based on how clearly each content fits its category.
+Return exactly {len(content_list)} categorization objects in the array.
 """
 
         return prompt
@@ -398,13 +628,40 @@ WEREWOLF SPECIFIC:
         }
 
     def _generate_cache_key(self, content: str, game_metadata: Dict[str, Any]) -> str:
-        """Generate cache key for categorization results"""
+        """Generate intelligent cache key for categorization results"""
 
-        # Use hash of content + game context for caching
-        content_hash = hash(content[:500])  # First 500 chars
+        # Normalize content for better cache hits
+        normalized_content = content.lower().strip()
+
+        # Remove common variations that don't affect categorization
+        normalized_content = re.sub(r'\s+', ' ', normalized_content)  # Normalize whitespace
+        normalized_content = re.sub(r'page\s+\d+', '', normalized_content)  # Remove page numbers
+        normalized_content = re.sub(r'\d+', 'NUM', normalized_content)  # Normalize numbers
+
+        # Use semantic content patterns for better cache hits
+        content_patterns = []
+
+        # Check for common content patterns
+        if 'spell' in normalized_content or 'magic' in normalized_content:
+            content_patterns.append('magic_content')
+        if 'combat' in normalized_content or 'attack' in normalized_content:
+            content_patterns.append('combat_content')
+        if 'character' in normalized_content or 'class' in normalized_content:
+            content_patterns.append('character_content')
+        if 'equipment' in normalized_content or 'item' in normalized_content:
+            content_patterns.append('equipment_content')
+
+        # Use pattern-based caching for similar content
+        if content_patterns:
+            pattern_key = '_'.join(sorted(content_patterns))
+            content_signature = f"{pattern_key}_{len(normalized_content)//100}"  # Group by content length
+        else:
+            # Fallback to content hash for unique content
+            content_signature = str(hash(normalized_content[:300]))
+
         game_context = f"{game_metadata['game_type']}_{game_metadata['edition']}_{game_metadata['book_type']}"
 
-        return f"{game_context}_{content_hash}"
+        return f"{game_context}_{content_signature}"
 
     def suggest_categories_for_game(self, game_metadata: Dict[str, Any]) -> List[str]:
         """Suggest possible categories for a specific game system"""

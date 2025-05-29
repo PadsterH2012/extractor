@@ -32,16 +32,34 @@ class MultiGamePDFProcessor:
         self.game_detector = AIGameDetector(ai_config=self.ai_config, debug=debug)
         self.categorizer = AICategorizer(ai_config=self.ai_config, debug=debug)
 
+        # Token tracking
+        self._current_session_id = None
+
         # Initialize text quality enhancer
         self.text_enhancer = TextQualityEnhancer(self.ai_config)
 
-        # Text quality settings
-        self.enable_text_enhancement = self.ai_config.get('enable_text_enhancement', True)
+        # Performance optimization settings
+        self.enable_ai_categorization = False  # Disable for speed - use simple categorization
+        self.enable_text_enhancement = self.ai_config.get("enable_text_enhancement", False)
+
+    def set_session_tracking(self, session_id: str, pricing_data: Dict = None):
+        """Set session ID for token tracking across all AI components"""
+        self._current_session_id = session_id
+
+        # Set session tracking for AI components
+        if hasattr(self.game_detector, 'set_session_tracking'):
+            self.game_detector.set_session_tracking(session_id, pricing_data)
+        if hasattr(self.categorizer, 'set_session_tracking'):
+            self.categorizer.set_session_tracking(session_id, pricing_data)
+
+        # Text quality settings (already set in __init__, don't override)
         self.aggressive_cleanup = self.ai_config.get('aggressive_cleanup', False)
 
         self.logger.info(f"AI-Powered Multi-Game PDF Processor initialized (Provider: {self.ai_config['provider']})")
         if self.enable_text_enhancement:
             self.logger.info("✨ Text quality enhancement enabled")
+        if not self.enable_ai_categorization:
+            self.logger.info("⚡ AI categorization disabled for speed - using simple rules")
 
     def setup_logging(self):
         """Setup logging configuration"""
@@ -88,6 +106,7 @@ class MultiGamePDFProcessor:
             game_metadata = self._create_forced_metadata(pdf_path, force_game_type, force_edition)
         else:
             # Use AI detection
+            self.logger.info(f"🔍 Game detector session ID: {getattr(self.game_detector, '_current_session_id', 'NOT SET')}")
             game_metadata = self.game_detector.analyze_game_metadata(pdf_path)
 
         # Add content type to metadata
@@ -223,9 +242,23 @@ class MultiGamePDFProcessor:
                 first_line = text.split('\n')[0].strip()[:100]
                 title = first_line if len(first_line) > 10 else f"Page {page_num + 1}"
 
-                # AI-powered categorization
-                categorization_result = self.categorizer.categorize_content(text, game_metadata)
-                category = categorization_result["primary_category"]
+                # Fast categorization (AI disabled for speed)
+                if self.enable_ai_categorization:
+                    categorization_result = self.categorizer.categorize_content(text, game_metadata)
+                    category = categorization_result["primary_category"]
+                else:
+                    # Simple rule-based categorization for speed
+                    category = self._simple_categorize_content(text, game_metadata)
+                    categorization_result = {
+                        "primary_category": category,
+                        "secondary_categories": [],
+                        "confidence": 0.8,
+                        "reasoning": "Simple rule-based categorization for speed",
+                        "key_topics": [],
+                        "game_specific_elements": [],
+                        "content_type": "description",
+                        "categorization_method": "simple_rules"
+                    }
 
                 # Create section with game metadata
                 section = {
@@ -260,6 +293,35 @@ class MultiGamePDFProcessor:
                 sections.append(section)
 
         return sections
+
+    def _simple_categorize_content(self, text: str, game_metadata: Dict[str, Any]) -> str:
+        """Simple rule-based categorization for speed (no AI calls)"""
+
+        text_lower = text.lower()
+
+        # Check for common RPG content patterns
+        if any(word in text_lower for word in ['spell', 'magic', 'incantation', 'cantrip']):
+            return "Magic/Spells"
+        elif any(word in text_lower for word in ['combat', 'attack', 'damage', 'armor class', 'hit points']):
+            return "Combat Rules"
+        elif any(word in text_lower for word in ['character', 'class', 'level', 'experience']):
+            return "Character Creation"
+        elif any(word in text_lower for word in ['equipment', 'weapon', 'armor', 'item']):
+            return "Equipment/Items"
+        elif any(word in text_lower for word in ['skill', 'ability', 'proficiency']):
+            return "Skills/Abilities"
+        elif any(word in text_lower for word in ['table', 'roll', 'dice', 'd20', 'd6']):
+            return "Tables/Charts"
+        elif any(word in text_lower for word in ['monster', 'creature', 'beast', 'npc']):
+            return "NPCs/Characters"
+        elif any(word in text_lower for word in ['adventure', 'quest', 'scenario', 'campaign']):
+            return "Adventures/Scenarios"
+        elif any(word in text_lower for word in ['rule', 'mechanic', 'system']):
+            return "Rules/Mechanics"
+        elif any(word in text_lower for word in ['lore', 'history', 'setting', 'world']):
+            return "Lore/Setting"
+        else:
+            return "General"
 
     def _extract_novel_content(self, doc, game_metadata: Dict[str, str]) -> Dict[str, Any]:
         """Extract content from novels with narrative-focused processing"""

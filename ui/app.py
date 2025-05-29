@@ -177,6 +177,21 @@ def get_openrouter_models():
         force_refresh = request.args.get('refresh', 'false').lower() == 'true'
         group_by_provider = request.args.get('group', 'true').lower() == 'true'
 
+        # Initialize session tracking for UI API calls
+        ui_session_id = "ui_session_" + str(hash("openrouter_models"))
+        from Modules.token_usage_tracker import get_tracker
+        tracker = get_tracker()
+
+        # Check if UI session already exists
+        existing_session = tracker.get_session_usage(ui_session_id)
+        if not existing_session:
+            tracker.start_session(ui_session_id)
+            logger.info(f"🔧 UI session tracking started: {ui_session_id}")
+
+        # Set session tracking for OpenRouter models (if it supports it)
+        if hasattr(openrouter_models, 'set_session_tracking'):
+            openrouter_models.set_session_tracking(ui_session_id)
+
         # Get models from OpenRouter
         if group_by_provider:
             models = openrouter_models.get_dropdown_options(group_by_provider=True)
@@ -313,7 +328,7 @@ def analyze_pdf():
         ai_provider = data.get('ai_provider', 'mock')
         ai_model = data.get('ai_model')  # For OpenRouter model selection
         content_type = data.get('content_type', 'source_material')
-        run_confidence_test = data.get('run_confidence_test', True)
+        run_confidence_test = data.get('run_confidence_test', False)  # Disable by default for speed
 
         if not filepath or not os.path.exists(filepath):
             return jsonify({'error': 'File not found'}), 400
@@ -353,7 +368,19 @@ def analyze_pdf():
         elif ai_provider == 'openrouter':
             logger.warning(f"🔧 OpenRouter selected but no model provided!")
 
+        # Initialize session tracking for analysis phase
+        session_id = str(hash(filepath))
+        from Modules.token_usage_tracker import get_tracker
+        tracker = get_tracker()
+        tracker.start_session(session_id)
+        logger.info(f"🔧 Analysis session tracking started: {session_id}")
+
         detector = AIGameDetector(ai_config)
+
+        # CRITICAL: Set session tracking IMMEDIATELY after detector creation
+        if hasattr(detector, 'set_session_tracking'):
+            detector.set_session_tracking(session_id)
+            logger.info(f"🔧 Analysis game detector session set: {session_id}")
 
         # Analyze the PDF
         logger.info(f"Analyzing PDF: {filepath} with provider: {ai_provider}")
@@ -361,7 +388,7 @@ def analyze_pdf():
         # Extract content for analysis (to store for copy functionality)
         extracted_content = detector.extract_analysis_content(Path(filepath))
 
-        # Perform AI analysis
+        # Perform AI analysis (this should now be tracked)
         game_metadata = detector.analyze_game_metadata(Path(filepath))
 
         # Add content type to game metadata
@@ -399,8 +426,7 @@ def analyze_pdf():
             game_metadata['recommended_method'] = confidence_results['recommended_method']
             game_metadata['confidence_issues'] = confidence_results.get('issues', [])
 
-        # Store results for later use
-        session_id = str(hash(filepath))
+        # Store results for later use (session_id already created above)
         analysis_results[session_id] = {
             'filepath': filepath,
             'filename': os.path.basename(filepath),
@@ -413,11 +439,19 @@ def analyze_pdf():
             'confidence_results': confidence_results
         }
 
+        # Calculate estimated token usage (rough estimate)
+        estimated_tokens = 0
+        if extracted_content.get('combined_text'):
+            # Rough estimate: 1 token per 4 characters
+            estimated_tokens = len(extracted_content['combined_text']) // 4
+
         return jsonify({
             'success': True,
             'session_id': session_id,
             'analysis': game_metadata,
-            'confidence': confidence_results
+            'confidence': confidence_results,
+            'tokens_used': estimated_tokens,
+            'provider_used': ai_provider
         })
 
     except Exception as e:
@@ -484,8 +518,8 @@ def extract_pdf():
         filepath = analysis['filepath']
         game_metadata = analysis['game_metadata']
 
-        # Get text quality settings from request
-        enable_text_enhancement = data.get('enable_text_enhancement', True)
+        # Text enhancement disabled - will be handled post-extraction in MongoDB
+        enable_text_enhancement = data.get('enable_text_enhancement', False)
         aggressive_cleanup = data.get('aggressive_cleanup', False)
 
         # Initialize PDF processor with progress callback
@@ -532,6 +566,22 @@ def extract_pdf():
         progress_tracking[session_id] = {}
         logger.info(f"🔧 Progress tracking initialized for session: {session_id}")
 
+        # Set up token tracking for the session (continue existing session if it exists)
+        from Modules.token_usage_tracker import get_tracker
+        tracker = get_tracker()
+
+        # Check if session already exists (from analysis phase)
+        existing_session = tracker.get_session_usage(session_id)
+        if existing_session:
+            logger.info(f"🔧 Continuing existing token tracking session: {session_id}")
+        else:
+            tracker.start_session(session_id)
+            logger.info(f"🔧 Token tracking started for session: {session_id}")
+
+        # Set session tracking for the processor
+        processor.set_session_tracking(session_id)
+        logger.info(f"🔧 Processor session tracking set for: {session_id}")
+
         # Create a progress callback function for this session
         def session_progress_callback(stage, status, details=None):
             logger.info(f"🔧 Progress callback: {session_id[:8]} - {stage} - {status}")
@@ -555,13 +605,53 @@ def extract_pdf():
         # Calculate text quality metrics from sections
         text_quality_metrics = calculate_text_quality_metrics(sections)
 
+        # Get token usage summary for this session
+        token_summary = tracker.get_session_summary(session_id)
+        active_sessions = tracker.list_active_sessions()
+        logger.info(f"🔍 Looking for tokens in session: {session_id[:8]} (full: {session_id})")
+        logger.info(f"🔍 Active sessions in tracker: {[s[:8] for s in active_sessions]}")
+
+        # Also check for UI session data and combine it
+        ui_session_id = "ui_session_" + str(hash("openrouter_models"))
+        ui_token_summary = tracker.get_session_summary(ui_session_id)
+        if ui_token_summary['found']:
+            logger.info(f"🔍 Found UI session data: {ui_token_summary['total_api_calls']} calls")
+            # Combine UI session data with extraction session data
+            token_summary['total_api_calls'] += ui_token_summary['total_api_calls']
+            token_summary['total_tokens'] += ui_token_summary['total_tokens']
+            token_summary['total_cost'] += ui_token_summary['total_cost']
+            token_summary['api_calls'].extend(ui_token_summary['api_calls'])
+
+        # If no tokens tracked in this session, check if there's a different session ID format
+        if token_summary['total_tokens'] == 0:
+            # Try alternative session ID formats (the token tracker might be using truncated IDs)
+            alt_session_ids = [
+                session_id[:8],            # Truncated session ID (most likely)
+                str(abs(hash(filepath))),  # Absolute hash
+                str(hash(filepath)),       # Original hash
+                session_id.split('-')[0] if '-' in session_id else session_id  # First part if hyphenated
+            ]
+
+            for alt_id in alt_session_ids:
+                if alt_id != session_id:  # Don't try the same ID again
+                    logger.info(f"🔍 Trying alternative session ID: {alt_id}")
+                    alt_token_summary = tracker.get_session_summary(alt_id)
+                    logger.info(f"🔍 Alternative session {alt_id} has {alt_token_summary['total_tokens']} tokens")
+                    if alt_token_summary['total_tokens'] > 0:
+                        token_summary = alt_token_summary
+                        logger.info(f"📊 Found tokens in alternative session ID: {alt_id} (original: {session_id[:8]})")
+                        break
+
+        logger.info(f"📊 Session {session_id[:8]} token summary: {token_summary['total_api_calls']} calls, {token_summary['total_tokens']} tokens, ${token_summary['total_cost']:.4f}")
+
         # Store extraction results
         extraction_results[session_id] = {
             'sections': sections,
             'summary': summary,
             'game_metadata': game_metadata,
             'text_quality_metrics': text_quality_metrics,
-            'extraction_time': datetime.now().isoformat()
+            'extraction_time': datetime.now().isoformat(),
+            'token_usage': token_summary
         }
 
         # Prepare response data
@@ -570,7 +660,13 @@ def extract_pdf():
             'summary': summary,
             'sections_count': len(sections),
             'text_quality_metrics': text_quality_metrics,
-            'ready_for_import': True
+            'ready_for_import': True,
+            'token_usage': {
+                'total_tokens': token_summary['total_tokens'],
+                'total_cost': token_summary['total_cost'],
+                'total_api_calls': token_summary['total_api_calls'],
+                'api_calls': token_summary['api_calls']
+            }
         }
 
         # Add character identification results for novels
@@ -843,7 +939,77 @@ def system_status():
             'mock': 'Available',
             'claude': 'Available' if os.getenv('ANTHROPIC_API_KEY') else 'API key not set',
             'openai': 'Available' if os.getenv('OPENAI_API_KEY') else 'API key not set',
+            'openrouter': 'Available' if os.getenv('OPENROUTER_API_KEY') else 'API key not set',
             'local': 'Available' if os.getenv('LOCAL_LLM_URL') else 'URL not set'
+        }
+
+        # Get current session token tracking if available
+        session_id = request.args.get('session_id')
+        from Modules.token_usage_tracker import get_tracker
+        tracker = get_tracker()
+
+        # Always check for UI session data first
+        ui_session_id = "ui_session_" + str(hash("openrouter_models"))
+        ui_token_summary = tracker.get_session_summary(ui_session_id)
+
+        # Debug logging - ALWAYS print this
+        active_sessions = tracker.list_active_sessions()
+        print(f"🔍 STATUS DEBUG - UI session ID: {ui_session_id}")
+        print(f"🔍 STATUS DEBUG - UI session found: {ui_token_summary['found']}")
+        print(f"🔍 STATUS DEBUG - UI session calls: {ui_token_summary['total_api_calls']}")
+        print(f"🔍 STATUS DEBUG - Active sessions: {[s[:8] for s in active_sessions]}")
+        logger.info(f"🔍 Status endpoint - UI session ID: {ui_session_id}")
+        logger.info(f"🔍 Status endpoint - UI session found: {ui_token_summary['found']}")
+        logger.info(f"🔍 Status endpoint - UI session calls: {ui_token_summary['total_api_calls']}")
+        logger.info(f"🔍 Status endpoint - Active sessions: {[s[:8] for s in active_sessions]}")
+
+        # Initialize token summary with UI session data
+        token_summary = {
+            'session_id': session_id or 'ui_only',
+            'found': ui_token_summary['found'],
+            'total_tokens': ui_token_summary['total_tokens'],
+            'total_cost': ui_token_summary['total_cost'],
+            'total_api_calls': ui_token_summary['total_api_calls'],
+            'api_calls': ui_token_summary['api_calls'].copy()
+        }
+
+        # If extraction session ID is provided, add its data
+        if session_id:
+            extraction_summary = tracker.get_session_summary(session_id)
+
+            # If extraction session found, combine with UI session
+            if extraction_summary['found']:
+                token_summary['total_tokens'] += extraction_summary['total_tokens']
+                token_summary['total_cost'] += extraction_summary['total_cost']
+                token_summary['total_api_calls'] += extraction_summary['total_api_calls']
+                token_summary['api_calls'].extend(extraction_summary['api_calls'])
+                token_summary['found'] = True
+
+            # If no extraction tokens found, try alternative session ID formats
+            elif extraction_summary['total_tokens'] == 0:
+                alt_session_ids = [
+                    str(abs(hash(session_id))),  # Absolute hash
+                    str(hash(session_id)),       # Original hash
+                    session_id[:8],              # Truncated session ID
+                    session_id.split('-')[0] if '-' in session_id else session_id  # First part if hyphenated
+                ]
+
+                for alt_id in alt_session_ids:
+                    if alt_id != session_id:  # Don't try the same ID again
+                        alt_token_summary = tracker.get_session_summary(alt_id)
+                        if alt_token_summary['total_tokens'] > 0:
+                            token_summary['total_tokens'] += alt_token_summary['total_tokens']
+                            token_summary['total_cost'] += alt_token_summary['total_cost']
+                            token_summary['total_api_calls'] += alt_token_summary['total_api_calls']
+                            token_summary['api_calls'].extend(alt_token_summary['api_calls'])
+                            token_summary['found'] = True
+                            break
+
+        token_info = {
+            'session_id': session_id or 'ui_session',
+            'total_tokens': token_summary['total_tokens'],
+            'total_cost': token_summary['total_cost'],
+            'total_api_calls': token_summary['total_api_calls']
         }
 
         return jsonify({
@@ -854,6 +1020,7 @@ def system_status():
             'ai_providers': ai_providers,
             'active_sessions': len(analysis_results),
             'completed_extractions': len(extraction_results),
+            'token_tracking': token_info,
             'version': get_version_info()
         })
 
@@ -1273,7 +1440,7 @@ def log_collection_deletion(collection_name: str, backup_path: str, user_ip: str
         # Store in audit log collection
         mongodb_manager = MongoDBManager()
         if mongodb_manager.connected:
-            audit_collection = mongodb_manager.database['rpger.system.audit_log']
+            audit_collection = mongodb_manager.database['system.audit_log']
             audit_collection.insert_one(log_entry)
             logger.info(f"Logged collection deletion: {collection_name}")
     except Exception as e:

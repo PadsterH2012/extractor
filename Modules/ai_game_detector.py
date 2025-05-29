@@ -22,9 +22,22 @@ class AIGameDetector:
         # Initialize AI client with full configuration
         self.ai_client = self._initialize_ai_client()
 
+        # Token tracking attributes
+        self._current_session_id = None
+        self._pricing_data = None
+
         # Analysis configuration
         self.analysis_pages = self.ai_config.get("analysis_pages", 25)  # First 25 pages to analyze for better book identification
         self.max_content_length = self.ai_config.get("max_tokens", 4000) // 2  # Reserve half for response
+
+    def set_session_tracking(self, session_id: str, pricing_data: Dict = None):
+        """Set session ID and pricing data for token tracking"""
+        self._current_session_id = session_id
+        self._pricing_data = pricing_data
+
+        # Also set session tracking on the AI client if it supports it
+        if hasattr(self.ai_client, 'set_session_tracking'):
+            self.ai_client.set_session_tracking(session_id, pricing_data)
 
     def _initialize_ai_client(self):
         """Initialize AI client based on provider and configuration"""
@@ -745,6 +758,15 @@ class OpenRouterClient:
         self.temperature = ai_config.get("temperature", 0.1)
         self.timeout = ai_config.get("timeout", 30)
 
+        # Token tracking attributes
+        self._current_session_id = None
+        self._pricing_data = None
+
+    def set_session_tracking(self, session_id: str, pricing_data: Dict = None):
+        """Set session ID and pricing data for token tracking"""
+        self._current_session_id = session_id
+        self._pricing_data = pricing_data
+
     def analyze(self, prompt: str) -> Dict[str, Any]:
         """Analyze content using OpenRouter API"""
         try:
@@ -770,7 +792,26 @@ class OpenRouterClient:
                 print(f"❌ OpenRouter API returned empty content")
                 return self._fallback_response()
 
-            return json.loads(content)
+            result = json.loads(content)
+
+            # Record token usage if available
+            if hasattr(response, 'usage') and response.usage:
+                result['_token_usage'] = {
+                    'prompt_tokens': response.usage.prompt_tokens,
+                    'completion_tokens': response.usage.completion_tokens,
+                    'total_tokens': response.usage.total_tokens
+                }
+                print(f"📊 OpenRouter tokens used: {response.usage.total_tokens} (prompt: {response.usage.prompt_tokens}, completion: {response.usage.completion_tokens})")
+
+                # Record usage in global tracker if session_id is available
+                session_id = getattr(self, '_current_session_id', None)
+                if session_id:
+                    from .token_usage_tracker import record_openrouter_usage
+                    # Get pricing data if available
+                    pricing_data = getattr(self, '_pricing_data', None)
+                    record_openrouter_usage(session_id, self.model, 'analyze', response, pricing_data)
+
+            return result
 
         except json.JSONDecodeError as e:
             print(f"❌ OpenRouter API JSON parse error: {e}")

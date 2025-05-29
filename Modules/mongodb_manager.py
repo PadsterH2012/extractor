@@ -500,9 +500,9 @@ class MongoDBManager:
 
         # Define protected collections
         protected_collections = [
-            'rpger.system.config',
-            'rpger.system.users',
-            'rpger.system.audit_log'
+            'system.config',
+            'system.users',
+            'system.audit_log'
         ]
 
         if collection_name in protected_collections:

@@ -6,16 +6,200 @@ let currentSessionId = null;
 let openRouterModels = null;
 let sessionTokens = 0;
 let sessionApiCalls = 0;
+let sessionCost = 0;
 let currentContentType = 'source_material';
 let savedSettings = {};
+
+// Model memory and recent models management
+const MODEL_MEMORY_KEY = 'last_selected_model';
+const RECENT_MODELS_KEY = 'recent_models';
+const MAX_RECENT_MODELS = 5;
+
+// Model memory functions
+function getLastSelectedModel() {
+    try {
+        return localStorage.getItem(MODEL_MEMORY_KEY);
+    } catch (e) {
+        console.warn('Failed to get last selected model from localStorage:', e);
+        return null;
+    }
+}
+
+function saveLastSelectedModel(modelId) {
+    try {
+        localStorage.setItem(MODEL_MEMORY_KEY, modelId);
+        console.log('💾 Saved last selected model:', modelId);
+    } catch (e) {
+        console.warn('Failed to save last selected model to localStorage:', e);
+    }
+}
+
+function getRecentModels() {
+    try {
+        const recent = localStorage.getItem(RECENT_MODELS_KEY);
+        return recent ? JSON.parse(recent) : [];
+    } catch (e) {
+        console.warn('Failed to get recent models from localStorage:', e);
+        return [];
+    }
+}
+
+function addToRecentModels(modelId) {
+    try {
+        let recentModels = getRecentModels();
+
+        // Remove if already exists
+        recentModels = recentModels.filter(id => id !== modelId);
+
+        // Add to beginning
+        recentModels.unshift(modelId);
+
+        // Keep only MAX_RECENT_MODELS
+        recentModels = recentModels.slice(0, MAX_RECENT_MODELS);
+
+        localStorage.setItem(RECENT_MODELS_KEY, JSON.stringify(recentModels));
+        console.log('📋 Updated recent models:', recentModels);
+
+        return recentModels;
+    } catch (e) {
+        console.warn('Failed to update recent models in localStorage:', e);
+        return [];
+    }
+}
+
+function recordModelUsage(modelId) {
+    if (!modelId) return;
+
+    console.log('📊 Recording model usage:', modelId);
+    saveLastSelectedModel(modelId);
+    addToRecentModels(modelId);
+
+    // Reorder dropdown if it exists
+    reorderModelDropdown();
+}
+
+function reorderModelDropdown() {
+    const modelSelect = document.getElementById('main-ai-model');
+    if (!modelSelect || !openRouterModels) return;
+
+    console.log('🔄 Reordering model dropdown...');
+
+    const recentModels = getRecentModels();
+    const currentValue = modelSelect.value;
+
+    // Clear existing options
+    modelSelect.innerHTML = '';
+
+    // Create arrays for different categories
+    const recentOptions = [];
+    const otherOptions = [];
+
+    // Categorize models (only process option models, not headers)
+    openRouterModels.forEach(model => {
+        if (model.type === 'option') {
+            if (recentModels.includes(model.value)) {
+                recentOptions.push(model);
+            } else {
+                otherOptions.push(model);
+            }
+        }
+    });
+
+    // Sort recent options by their position in recentModels array
+    recentOptions.sort((a, b) => {
+        return recentModels.indexOf(a.value) - recentModels.indexOf(b.value);
+    });
+
+    // Add recent models section
+    if (recentOptions.length > 0) {
+        const recentGroup = document.createElement('optgroup');
+        recentGroup.label = '🕒 Recently Used';
+
+        recentOptions.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            option.setAttribute('data-description', model.description);
+            option.setAttribute('data-provider', model.provider);
+            if (model.pricing) {
+                option.setAttribute('data-pricing', JSON.stringify(model.pricing));
+            }
+            recentGroup.appendChild(option);
+        });
+
+        modelSelect.appendChild(recentGroup);
+    }
+
+    // Add separator and other models
+    if (otherOptions.length > 0) {
+        const otherGroup = document.createElement('optgroup');
+        otherGroup.label = '📋 All Models';
+
+        otherOptions.forEach(model => {
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            option.setAttribute('data-description', model.description);
+            option.setAttribute('data-provider', model.provider);
+            if (model.pricing) {
+                option.setAttribute('data-pricing', JSON.stringify(model.pricing));
+            }
+            otherGroup.appendChild(option);
+        });
+
+        modelSelect.appendChild(otherGroup);
+    }
+
+    // Restore selected value
+    if (currentValue) {
+        modelSelect.value = currentValue;
+    }
+
+    console.log('✅ Model dropdown reordered');
+}
+
+// Initialize session tracking from UI values
+function initializeSessionTracking() {
+    // Get current values from UI
+    const sessionTokensElement = document.getElementById('session-tokens');
+    const sessionApiCallsElement = document.getElementById('session-api-calls');
+
+    if (sessionTokensElement) {
+        const tokensText = sessionTokensElement.textContent;
+        const tokensMatch = tokensText.match(/(\d+(?:,\d+)*)/);
+        if (tokensMatch) {
+            sessionTokens = parseInt(tokensMatch[1].replace(/,/g, ''));
+            console.log('📊 Initialized session tokens from UI:', sessionTokens);
+        }
+    }
+
+    if (sessionApiCallsElement) {
+        const callsText = sessionApiCallsElement.textContent;
+        const callsMatch = callsText.match(/(\d+)/);
+        if (callsMatch) {
+            sessionApiCalls = parseInt(callsMatch[1]);
+            console.log('📊 Initialized session API calls from UI:', sessionApiCalls);
+        }
+    }
+
+    // Calculate initial cost
+    recalculateSessionCost();
+}
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function() {
     initializeFileUpload();
     initializeProgressTracking();
     initializeAIProviderManagement();
+    initializeMainAIProvider(); // Initialize main AI provider
     loadSavedSettings();
     checkStatus();
+
+    // Initialize session tracking after a short delay to ensure UI is loaded
+    setTimeout(() => {
+        initializeSessionTracking();
+        updateSessionTracking();
+    }, 500);
 
     // Initialize temperature slider
     const temperatureSlider = document.getElementById('ai-temperature');
@@ -31,6 +215,72 @@ document.addEventListener('DOMContentLoaded', function() {
         contentTypeSelect.addEventListener('change', onContentTypeChange);
     }
 });
+
+// Card collapse/expand functionality
+function collapseCard(cardId) {
+    const card = document.getElementById(cardId);
+    if (card) {
+        const cardBody = card.querySelector('.card-body');
+        const cardHeader = card.querySelector('.card-header');
+
+        if (cardBody && cardHeader) {
+            // Add collapsed class and hide body
+            card.classList.add('collapsed');
+            cardBody.style.display = 'none';
+
+            // Add collapse indicator to header
+            let collapseIcon = cardHeader.querySelector('.collapse-icon');
+            if (!collapseIcon) {
+                collapseIcon = document.createElement('i');
+                collapseIcon.className = 'fas fa-chevron-down collapse-icon ms-2';
+                cardHeader.querySelector('h5').appendChild(collapseIcon);
+            } else {
+                collapseIcon.className = 'fas fa-chevron-down collapse-icon ms-2';
+            }
+
+            // Make header clickable to expand
+            cardHeader.style.cursor = 'pointer';
+            cardHeader.onclick = () => expandCard(cardId);
+        }
+    }
+}
+
+function expandCard(cardId) {
+    const card = document.getElementById(cardId);
+    if (card) {
+        const cardBody = card.querySelector('.card-body');
+        const cardHeader = card.querySelector('.card-header');
+
+        if (cardBody && cardHeader) {
+            // Remove collapsed class and show body
+            card.classList.remove('collapsed');
+            cardBody.style.display = 'block';
+
+            // Update collapse indicator
+            const collapseIcon = cardHeader.querySelector('.collapse-icon');
+            if (collapseIcon) {
+                collapseIcon.className = 'fas fa-chevron-up collapse-icon ms-2';
+            }
+
+            // Update click handler to collapse
+            cardHeader.onclick = () => collapseCard(cardId);
+        }
+    }
+}
+
+function autoProgressWorkflow() {
+    // Auto-collapse Step 1 and expand Step 2 after successful upload
+    setTimeout(() => {
+        collapseCard('upload-card');
+        expandCard('analysis-card');
+
+        // Smooth scroll to Step 2
+        const analysisCard = document.getElementById('analysis-card');
+        if (analysisCard) {
+            analysisCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    }, 500); // Small delay for smooth transition
+}
 
 // File Upload Handling
 function initializeFileUpload() {
@@ -204,6 +454,7 @@ function uploadFile(file) {
             displayFileInfo(data);
             updateProgress('upload', 'completed');
             showAnalysisCard();
+            autoProgressWorkflow(); // Auto-collapse Step 1 and expand Step 2
             showToast('File uploaded successfully', 'success');
         } else {
             console.log('Upload failed:', data);
@@ -243,16 +494,37 @@ function showAnalysisCard() {
     document.getElementById('analysis-card').scrollIntoView({ behavior: 'smooth' });
 }
 
-// Handle AI provider change
-function onProviderChange() {
-    const provider = document.getElementById('ai-provider').value;
-    const modelContainer = document.getElementById('model-selection-container');
+// Handle main AI provider change
+function onMainProviderChange() {
+    const provider = document.getElementById('main-ai-provider').value;
+    const modelContainer = document.getElementById('main-model-selection-container');
+
+    // Save preference
+    localStorage.setItem('preferred_ai_provider', provider);
+
+    // Update hidden inputs for compatibility
+    document.getElementById('ai-provider').value = provider;
 
     if (provider === 'openrouter') {
         modelContainer.style.display = 'block';
-        loadOpenRouterModels();
+        loadMainOpenRouterModels();
     } else {
         modelContainer.style.display = 'none';
+        document.getElementById('ai-model').value = '';
+    }
+
+    // Update system status to reflect new provider
+    checkStatus();
+}
+
+// Handle AI provider change (legacy compatibility)
+function onProviderChange() {
+    // This function is kept for compatibility but now syncs with main provider
+    const provider = document.getElementById('ai-provider').value;
+    const mainProvider = document.getElementById('main-ai-provider');
+    if (mainProvider && mainProvider.value !== provider) {
+        mainProvider.value = provider;
+        onMainProviderChange();
     }
 }
 
@@ -349,12 +621,298 @@ function populateModelDropdown(models, recommended = []) {
     });
 }
 
-// Refresh models
-function refreshModels() {
-    const provider = document.getElementById('ai-provider').value;
-    if (provider === 'openrouter') {
-        loadOpenRouterModels(true);
+// Load main OpenRouter models
+async function loadMainOpenRouterModels(forceRefresh = false) {
+    const modelSelect = document.getElementById('main-ai-model');
+    const modelDescription = document.getElementById('main-model-description');
+
+    try {
+        // Show loading state
+        modelSelect.innerHTML = '<option value="">Loading models...</option>';
+        modelDescription.textContent = 'Loading available models...';
+
+        // Fetch models from API
+        const response = await fetch(`/api/openrouter/models?refresh=${forceRefresh}&group=true`);
+        const data = await response.json();
+
+        if (data.success) {
+            openRouterModels = data.models;
+            populateMainModelDropdown(data.models, data.recommended);
+            modelDescription.textContent = `${data.total_models} models available`;
+
+            // Restore last selected model
+            const lastSelectedModel = getLastSelectedModel();
+            if (lastSelectedModel && !forceRefresh) {
+                const modelExists = data.models.some(m => m.value === lastSelectedModel);
+                if (modelExists) {
+                    modelSelect.value = lastSelectedModel;
+                    console.log('🔄 Restored last selected model:', lastSelectedModel);
+
+                    // Trigger change event to update description
+                    modelSelect.dispatchEvent(new Event('change'));
+                }
+            }
+
+            // Apply recent model ordering
+            reorderModelDropdown();
+
+            // Update hidden input for compatibility
+            const selectedModel = modelSelect.value;
+            document.getElementById('ai-model').value = selectedModel;
+        } else {
+            throw new Error(data.error || 'Failed to load models');
+        }
+
+    } catch (error) {
+        console.error('Error loading OpenRouter models:', error);
+        modelSelect.innerHTML = '<option value="">Error loading models</option>';
+        modelDescription.textContent = 'Failed to load models. Check API key.';
+        showToast('Failed to load OpenRouter models: ' + error.message, 'error');
     }
+}
+
+// Populate main model dropdown
+function populateMainModelDropdown(models, recommended = []) {
+    const modelSelect = document.getElementById('main-ai-model');
+    modelSelect.innerHTML = '';
+
+    // Add default option
+    const defaultOption = document.createElement('option');
+    defaultOption.value = '';
+    defaultOption.textContent = 'Select a model...';
+    modelSelect.appendChild(defaultOption);
+
+    // Add recommended section first
+    if (recommended.length > 0) {
+        const recommendedGroup = document.createElement('optgroup');
+        recommendedGroup.label = '⭐ Recommended for Character Analysis';
+
+        models.filter(model => model.type === 'option' && recommended.includes(model.value))
+              .forEach(model => {
+                  const option = document.createElement('option');
+                  option.value = model.value;
+                  option.textContent = model.label;
+                  option.setAttribute('data-description', model.description);
+                  option.setAttribute('data-provider', model.provider);
+                  if (model.pricing) {
+                      option.setAttribute('data-pricing', JSON.stringify(model.pricing));
+                  }
+                  recommendedGroup.appendChild(option);
+              });
+
+        if (recommendedGroup.children.length > 0) {
+            modelSelect.appendChild(recommendedGroup);
+        }
+    }
+
+    // Add all models grouped by provider
+    let currentGroup = null;
+    models.forEach(model => {
+        if (model.type === 'header') {
+            currentGroup = document.createElement('optgroup');
+            currentGroup.label = model.label;
+            modelSelect.appendChild(currentGroup);
+        } else if (model.type === 'option' && currentGroup) {
+            const option = document.createElement('option');
+            option.value = model.value;
+            option.textContent = model.label;
+            option.setAttribute('data-description', model.description);
+            option.setAttribute('data-provider', model.provider);
+            if (model.pricing) {
+                option.setAttribute('data-pricing', JSON.stringify(model.pricing));
+            }
+            currentGroup.appendChild(option);
+        }
+    });
+
+    // Add change event listener to show model description
+    modelSelect.addEventListener('change', function() {
+        const selectedOption = this.options[this.selectedIndex];
+        const description = selectedOption.getAttribute('data-description') || 'No description available';
+        const provider = selectedOption.getAttribute('data-provider') || '';
+        const pricing = selectedOption.getAttribute('data-pricing');
+
+        const modelDescription = document.getElementById('main-model-description');
+        if (this.value) {
+            let descriptionText = `${provider}: ${description}`;
+
+            // Add pricing information if available
+            if (pricing) {
+                try {
+                    const pricingData = JSON.parse(pricing);
+                    if (pricingData.prompt && pricingData.completion) {
+                        // OpenRouter pricing is per token, convert to per 1M tokens for display
+                        const promptCostPerToken = parseFloat(pricingData.prompt);
+                        const completionCostPerToken = parseFloat(pricingData.completion);
+                        const promptCostPer1M = promptCostPerToken * 1000000;
+                        const completionCostPer1M = completionCostPerToken * 1000000;
+
+                        console.log('💰 Pricing debug - Raw:', pricingData, 'Per 1M:', promptCostPer1M, completionCostPer1M);
+
+                        descriptionText += ` | $${promptCostPer1M.toFixed(3)}/$${completionCostPer1M.toFixed(3)} per 1M tokens`;
+                    }
+                } catch (e) {
+                    console.warn('Failed to parse pricing data:', e);
+                }
+            }
+
+            modelDescription.textContent = descriptionText;
+        } else {
+            modelDescription.textContent = 'Select a model for analysis';
+        }
+
+        // Update hidden input for compatibility
+        document.getElementById('ai-model').value = this.value;
+
+        // Record model usage for memory and recent models
+        if (this.value) {
+            recordModelUsage(this.value);
+        }
+
+        // Recalculate session cost when model changes
+        recalculateSessionCost();
+    });
+}
+
+// Refresh main models
+function refreshMainModels() {
+    const provider = document.getElementById('main-ai-provider').value;
+    if (provider === 'openrouter') {
+        loadMainOpenRouterModels(true);
+    }
+}
+
+// Refresh models (legacy compatibility)
+function refreshModels() {
+    refreshMainModels();
+}
+
+// Initialize main AI provider configuration
+function initializeMainAIProvider() {
+    // Set default provider
+    const mainProvider = document.getElementById('main-ai-provider');
+    if (mainProvider) {
+        // Check for saved preference or use default
+        const savedProvider = localStorage.getItem('preferred_ai_provider') || 'mock';
+        mainProvider.value = savedProvider;
+
+        // Sync with hidden input
+        document.getElementById('ai-provider').value = savedProvider;
+
+        // Initialize model selection if OpenRouter
+        if (savedProvider === 'openrouter') {
+            onMainProviderChange();
+        }
+    }
+}
+
+// Calculate cost for tokens based on current model
+function calculateTokenCost(tokens, modelId = null) {
+    console.log('🔍 Calculating cost for', tokens, 'tokens, modelId:', modelId);
+
+    if (!modelId) {
+        const provider = document.getElementById('main-ai-provider')?.value || 'mock';
+        console.log('🔍 Current provider:', provider);
+
+        if (provider !== 'openrouter') {
+            console.log('🔍 Non-OpenRouter provider, returning 0 cost');
+            return 0; // No cost for non-OpenRouter providers
+        }
+        modelId = document.getElementById('main-ai-model')?.value;
+        console.log('🔍 Selected model ID:', modelId);
+    }
+
+    if (!modelId) {
+        console.log('🔍 No model ID, returning 0 cost');
+        return 0;
+    }
+
+    if (!openRouterModels) {
+        console.log('🔍 No cached models, returning 0 cost');
+        return 0;
+    }
+
+    // Find the model in our cached models
+    const model = openRouterModels.find(m => m.value === modelId);
+    console.log('🔍 Found model:', model);
+
+    if (!model || !model.pricing) {
+        console.log('🔍 No model or pricing data, returning 0 cost');
+        return 0;
+    }
+
+    // OpenRouter pricing is per token (not per 1M tokens)
+    const promptCostPerToken = parseFloat(model.pricing.prompt) || 0;
+    const completionCostPerToken = parseFloat(model.pricing.completion) || 0;
+
+    console.log('🔍 Pricing - Prompt per token:', promptCostPerToken, 'Completion per token:', completionCostPerToken);
+
+    // Use average of prompt and completion cost for estimation
+    const avgCostPerToken = (promptCostPerToken + completionCostPerToken) / 2;
+    const totalCost = tokens * avgCostPerToken;
+
+    console.log('🔍 Calculated cost:', totalCost, 'for', tokens, 'tokens');
+
+    return totalCost;
+}
+
+// Reset session tracking
+function resetSessionTracking() {
+    sessionTokens = 0;
+    sessionApiCalls = 0;
+    sessionCost = 0;
+    updateSessionTracking();
+}
+
+// Recalculate session cost based on current model
+function recalculateSessionCost() {
+    if (sessionTokens > 0) {
+        console.log('🔄 Recalculating session cost for', sessionTokens, 'tokens');
+        sessionCost = calculateTokenCost(sessionTokens);
+        console.log('💰 Recalculated session cost:', sessionCost);
+        updateSessionTracking();
+    }
+}
+
+// Update session tracking display
+function updateSessionTracking() {
+    const sessionTokensElement = document.getElementById('session-tokens');
+    const sessionApiCallsElement = document.getElementById('session-api-calls');
+    const sessionCostElement = document.getElementById('session-cost');
+
+    console.log('📊 Updating display - Tokens:', sessionTokens, 'Cost:', sessionCost, 'API Calls:', sessionApiCalls);
+
+    if (sessionTokensElement) {
+        sessionTokensElement.textContent = sessionTokens.toLocaleString();
+    }
+
+    if (sessionApiCallsElement) {
+        sessionApiCallsElement.textContent = sessionApiCalls;
+    }
+
+    if (sessionCostElement) {
+        sessionCostElement.textContent = `$${sessionCost.toFixed(4)}`;
+    }
+}
+
+// Refresh token tracking from server
+function refreshTokenTracking() {
+    if (!currentSessionId) return;
+
+    fetch(`/status?session_id=${currentSessionId}`)
+    .then(response => response.json())
+    .then(data => {
+        if (data.token_tracking && data.token_tracking.total_tokens > 0) {
+            console.log('🔄 Refreshed token tracking:', data.token_tracking);
+            sessionTokens = data.token_tracking.total_tokens;
+            sessionApiCalls = data.token_tracking.total_api_calls;
+            sessionCost = data.token_tracking.total_cost;
+            updateSessionTracking();
+        }
+    })
+    .catch(error => {
+        console.error('Token tracking refresh error:', error);
+    });
 }
 
 // Analyze PDF with AI
@@ -364,17 +922,23 @@ function analyzePDF() {
         return;
     }
 
-    const aiProvider = document.getElementById('ai-provider').value;
+    // Get AI provider from main configuration
+    const aiProvider = document.getElementById('main-ai-provider').value;
     const contentType = document.getElementById('content-type').value;
+
+    // Update hidden inputs for compatibility
+    document.getElementById('ai-provider').value = aiProvider;
 
     // Get selected model for OpenRouter
     let selectedModel = null;
     if (aiProvider === 'openrouter') {
-        selectedModel = document.getElementById('ai-model').value;
+        selectedModel = document.getElementById('main-ai-model').value;
         if (!selectedModel) {
             showToast('Please select a model for OpenRouter', 'error');
             return;
         }
+        // Update hidden input for compatibility
+        document.getElementById('ai-model').value = selectedModel;
     }
 
     document.getElementById('analyze-btn').disabled = true;
@@ -391,6 +955,8 @@ function analyzePDF() {
     // Add model selection for OpenRouter
     if (selectedModel) {
         requestBody.ai_model = selectedModel;
+        // Record model usage when starting analysis
+        recordModelUsage(selectedModel);
     }
 
     fetch('/analyze', {
@@ -411,6 +977,23 @@ function analyzePDF() {
             updateProgress('analyze', 'completed');
             showExtractionCard();
             showToast('Analysis completed successfully', 'success');
+
+            // Update session tracking
+            sessionApiCalls += 1;
+
+            if (data.tokens_used) {
+                console.log('📊 Adding', data.tokens_used, 'tokens to session');
+                sessionTokens += data.tokens_used;
+
+                // Calculate and add cost
+                const tokenCost = calculateTokenCost(data.tokens_used);
+                console.log('💰 Calculated cost:', tokenCost);
+                sessionCost += tokenCost;
+
+                console.log('📊 Session totals - Tokens:', sessionTokens, 'Cost:', sessionCost, 'API Calls:', sessionApiCalls);
+            }
+
+            updateSessionTracking();
         } else {
             showToast(data.error || 'Analysis failed', 'error');
         }
@@ -499,9 +1082,9 @@ function extractContent() {
         startProgressPolling(currentSessionId);
     }
 
-    // Get text quality settings
-    const enableTextEnhancement = document.getElementById('enableTextEnhancement')?.checked ?? true;
-    const aggressiveCleanup = document.getElementById('aggressiveCleanup')?.checked ?? false;
+    // Text enhancement disabled - will be handled post-extraction in MongoDB
+    const enableTextEnhancement = false;
+    const aggressiveCleanup = false;
 
     fetch('/extract', {
         method: 'POST',
@@ -536,6 +1119,20 @@ function extractContent() {
             updateProgress('extract', 'completed');
             showImportCard();
             showToast('Content extracted successfully', 'success');
+
+            // Update session tracking with extraction token usage
+            if (data.token_usage) {
+                console.log('📊 Extraction token usage:', data.token_usage);
+                sessionTokens += data.token_usage.total_tokens;
+                sessionApiCalls += data.token_usage.total_api_calls;
+                sessionCost += data.token_usage.total_cost;
+
+                console.log('📊 Updated session totals - Tokens:', sessionTokens, 'Cost:', sessionCost, 'API Calls:', sessionApiCalls);
+                updateSessionTracking();
+            }
+
+            // Refresh token tracking from server to ensure accuracy
+            setTimeout(refreshTokenTracking, 1000);
         } else {
             showToast(data.error || 'Extraction failed', 'error');
         }
@@ -1162,10 +1759,22 @@ function fallbackCopyText(text) {
 
 // Check system status
 function checkStatus() {
-    fetch('/status')
+    // Include session ID if available for token tracking
+    const url = currentSessionId ? `/status?session_id=${currentSessionId}` : '/status';
+
+    fetch(url)
     .then(response => response.json())
     .then(data => {
         displaySystemStatus(data);
+
+        // Update token tracking if available
+        if (data.token_tracking && data.token_tracking.total_tokens > 0) {
+            console.log('📊 Real-time token tracking:', data.token_tracking);
+            sessionTokens = data.token_tracking.total_tokens;
+            sessionApiCalls = data.token_tracking.total_api_calls;
+            sessionCost = data.token_tracking.total_cost;
+            updateSessionTracking();
+        }
     })
     .catch(error => {
         console.error('Status check error:', error);
@@ -1179,46 +1788,27 @@ function displaySystemStatus(status) {
     const chromaStatusClass = status.chroma_status === 'Connected' ? 'status-connected' : 'status-error';
     const mongoStatusClass = status.mongodb_status === 'Connected' ? 'status-connected' : 'status-error';
 
-    let providersHtml = '';
-    for (const [provider, providerStatus] of Object.entries(status.ai_providers)) {
-        const statusClass = providerStatus === 'Available' ? 'provider-available' : 'provider-unavailable';
-        providersHtml += `
-            <div class="provider-status">
-                <span>${provider.toUpperCase()}</span>
-                <span class="${statusClass}">${providerStatus}</span>
-            </div>
-        `;
-    }
-
     const statusHtml = `
         <div class="mb-2">
             <span class="status-indicator ${chromaStatusClass}"></span>
             <strong>ChromaDB:</strong> ${status.chroma_status}
-        </div>
-        <div class="mb-2">
-            <small class="text-muted">Collections: ${status.chroma_collections}</small>
+            <br><small class="text-muted">Collections: ${status.chroma_collections}</small>
         </div>
         <div class="mb-2">
             <span class="status-indicator ${mongoStatusClass}"></span>
             <strong>MongoDB:</strong> ${status.mongodb_status}
+            <br><small class="text-muted">Collections: ${status.mongodb_collections}</small>
         </div>
         <div class="mb-2">
-            <small class="text-muted">Collections: ${status.mongodb_collections}</small>
-        </div>
-        <div class="mb-3">
-            <strong>AI Providers:</strong>
-            ${providersHtml}
-        </div>
-        <div class="small text-muted">
-            Active Sessions: ${status.active_sessions}<br>
-            Completed: ${status.completed_extractions}
-        </div>
-        <div class="mt-3 pt-3 border-top">
-            <strong>Version Info:</strong>
+            <strong>Sessions:</strong>
             <div class="small text-muted">
-                Version: ${status.version.version}<br>
-                Build: ${status.version.build_date}<br>
-                Environment: ${status.version.environment}
+                Active: ${status.active_sessions} | Completed: ${status.completed_extractions}
+            </div>
+        </div>
+        <div class="mt-2 pt-2 border-top">
+            <strong>Version:</strong>
+            <div class="small text-muted">
+                ${status.version.version} (${status.version.environment})
             </div>
         </div>
     `;

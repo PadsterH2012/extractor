@@ -63,43 +63,26 @@
                         </h5>
                     </div>
                     <div class="card-body">
-                        <div class="row mb-3">
-                            <div class="col-md-3">
-                                <label for="ai-provider" class="form-label">AI Provider</label>
-                                <select class="form-select" id="ai-provider" onchange="onProviderChange()">
-                                    <option value="mock">Mock AI (Immediate)</option>
-                                    <option value="claude">Claude AI (Recommended)</option>
-                                    <option value="openai">OpenAI GPT-4</option>
-                                    <option value="openrouter">OpenRouter (300+ Models)</option>
-                                    <option value="local">Local LLM</option>
-                                </select>
-                            </div>
-                            <div class="col-md-3" id="model-selection-container" style="display: none;">
-                                <label for="ai-model" class="form-label">
-                                    Model
-                                    <button class="btn btn-link btn-sm p-0" onclick="refreshModels()" title="Refresh model list">
-                                        <i class="fas fa-sync-alt"></i>
-                                    </button>
-                                </label>
-                                <select class="form-select" id="ai-model">
-                                    <option value="">Loading models...</option>
-                                </select>
-                                <small class="text-muted" id="model-description">Select a model for analysis</small>
-                            </div>
-                            <div class="col-md-3">
-                                <label for="content-type" class="form-label">Content Type</label>
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-6">
+                                <label for="content-type" class="form-label fw-semibold">Content Type</label>
                                 <select class="form-select" id="content-type">
                                     <option value="source_material">Source Material</option>
                                     <option value="novel">Novel</option>
                                 </select>
                                 <small class="text-muted">Select content type for optimal extraction</small>
                             </div>
-                            <div class="col-md-3 d-flex align-items-end">
-                                <button class="btn btn-success" id="analyze-btn" onclick="analyzePDF()">
-                                    <i class="fas fa-search"></i> Analyze PDF
+                            <div class="col-md-6">
+                                <button class="btn btn-success w-100 btn-lg" id="analyze-btn" onclick="analyzePDF()">
+                                    <i class="fas fa-search me-2"></i> Analyze PDF
                                 </button>
                             </div>
                         </div>
+
+                        <!-- Hidden inputs to maintain compatibility -->
+                        <input type="hidden" id="ai-provider" value="mock">
+                        <input type="hidden" id="ai-model" value="">
+                        <div id="model-selection-container" style="display: none;"></div>
                         <div id="analysis-progress" style="display: none;">
                             <div class="progress mb-3">
                                 <div class="progress-bar progress-bar-striped progress-bar-animated"
@@ -131,30 +114,7 @@
                     <div class="card-body">
                         <p class="text-muted">Extract and categorize content from the analyzed PDF.</p>
 
-                        <!-- Text Quality Enhancement Settings -->
-                        <div class="alert alert-light border mb-3">
-                            <h6><i class="fas fa-magic"></i> Text Quality Enhancement</h6>
-                            <div class="row">
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="enableTextEnhancement" checked>
-                                        <label class="form-check-label" for="enableTextEnhancement">
-                                            <strong>Enable Text Enhancement</strong>
-                                        </label>
-                                        <div class="small text-muted">Spell checking, OCR cleanup, and quality scoring</div>
-                                    </div>
-                                </div>
-                                <div class="col-md-6">
-                                    <div class="form-check">
-                                        <input class="form-check-input" type="checkbox" id="aggressiveCleanup">
-                                        <label class="form-check-label" for="aggressiveCleanup">
-                                            <strong>Aggressive Cleanup</strong>
-                                        </label>
-                                        <div class="small text-muted">More corrections, may change meaning</div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+
 
                         <button class="btn btn-warning" id="extract-btn" onclick="extractContent()">
                             <i class="fas fa-play"></i> Extract Content
@@ -318,9 +278,42 @@
                         </h6>
                     </div>
                     <div class="card-body">
+                        <!-- AI Provider Configuration -->
+                        <div class="mb-3">
+                            <div class="row">
+                                <div class="col-12">
+                                    <label for="main-ai-provider" class="form-label small"><strong>AI Provider</strong></label>
+                                    <select class="form-select form-select-sm" id="main-ai-provider" onchange="onMainProviderChange()">
+                                        <option value="mock">Mock AI (Immediate)</option>
+                                        <option value="claude">Claude AI (Recommended)</option>
+                                        <option value="openai">OpenAI GPT-4</option>
+                                        <option value="openrouter">OpenRouter (300+ Models)</option>
+                                        <option value="local">Local LLM</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="row mt-2" id="main-model-selection-container" style="display: none;">
+                                <div class="col-12">
+                                    <label for="main-ai-model" class="form-label small">
+                                        <strong>Model</strong>
+                                        <button class="btn btn-link btn-sm p-0 ms-1" onclick="refreshMainModels()" title="Refresh model list">
+                                            <i class="fas fa-sync-alt"></i>
+                                        </button>
+                                    </label>
+                                    <select class="form-select form-select-sm" id="main-ai-model">
+                                        <option value="">Loading models...</option>
+                                    </select>
+                                    <small class="text-muted" id="main-model-description">Select a model for analysis</small>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- System Status -->
                         <div id="status-content">
                             <p class="text-muted">Click "Status" to check system health</p>
                         </div>
+
+                        <!-- Database Browse Buttons -->
                         <div class="mt-3">
                             <button class="btn btn-outline-primary btn-sm me-2" onclick="browseChromaDB()">
                                 <i class="fas fa-database"></i> Browse ChromaDB
@@ -404,6 +397,17 @@
 
                         <!-- Token Usage Tracker -->
                         <div class="mt-3 pt-3 border-top">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <small class="text-muted">
+                                    <i class="fas fa-dollar-sign"></i> Session Cost
+                                </small>
+                                <small class="text-muted">
+                                    <span id="session-cost">$0.00</span>
+                                    <button class="btn btn-link btn-sm p-0 ms-1" onclick="recalculateSessionCost()" title="Recalculate cost">
+                                        <i class="fas fa-sync-alt" style="font-size: 0.7rem;"></i>
+                                    </button>
+                                </small>
+                            </div>
                             <div class="d-flex justify-content-between align-items-center">
                                 <small class="text-muted">
                                     <i class="fas fa-coins"></i> Session Tokens

@@ -880,8 +880,10 @@ function recalculateSessionCost() {
         console.log('🔄 Recalculating session cost for', sessionTokens, 'tokens');
         sessionCost = calculateTokenCost(sessionTokens);
         console.log('💰 Recalculated session cost:', sessionCost);
-        updateSessionTracking();
     }
+    
+    // Always update the UI display to show current values
+    updateSessionTracking();
     
     // Also refresh token tracking from server to get latest data
     refreshTokenTracking();

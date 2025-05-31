@@ -503,25 +503,76 @@
                         <!-- Database Configuration -->
                         <div class="col-md-6">
                             <h6><i class="fas fa-database"></i> Database Configuration</h6>
+                            
+                            <!-- Deployment Mode Selector -->
                             <div class="mb-3">
-                                <label class="form-label">ChromaDB Host</label>
-                                <input type="text" class="form-control" id="chromadb-host" placeholder="10.202.28.49">
+                                <label class="form-label">
+                                    <i class="fas fa-docker"></i> Deployment Mode
+                                </label>
+                                <div class="d-flex gap-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="deployment-mode" id="mode-containers" value="containers" checked onchange="toggleDeploymentMode()">
+                                        <label class="form-check-label" for="mode-containers">
+                                            Container Stack
+                                        </label>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="radio" name="deployment-mode" id="mode-external" value="external" onchange="toggleDeploymentMode()">
+                                        <label class="form-check-label" for="mode-external">
+                                            External Databases
+                                        </label>
+                                    </div>
+                                </div>
+                                <small class="text-muted">Choose between containerized databases or external services</small>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">ChromaDB Port</label>
-                                <input type="number" class="form-control" id="chromadb-port" placeholder="8000">
+                            
+                            <!-- Container Mode Settings -->
+                            <div id="container-db-settings">
+                                <div class="alert alert-info py-2 mb-3">
+                                    <small><i class="fas fa-info-circle"></i> Using containerized MongoDB and ChromaDB</small>
+                                </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">MongoDB Host</label>
-                                <input type="text" class="form-control" id="mongodb-host" placeholder="10.202.28.46">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">MongoDB Port</label>
-                                <input type="number" class="form-control" id="mongodb-port" placeholder="27017">
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">MongoDB Database</label>
-                                <input type="text" class="form-control" id="mongodb-database" placeholder="rpger">
+                            
+                            <!-- External Mode Settings -->
+                            <div id="external-db-settings" style="display: none;">
+                                <div class="mb-3">
+                                    <label class="form-label">ChromaDB Host</label>
+                                    <input type="text" class="form-control" id="chromadb-host" placeholder="your-chromadb-host.com">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">ChromaDB Port</label>
+                                    <input type="number" class="form-control" id="chromadb-port" placeholder="8000">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">MongoDB Host</label>
+                                    <input type="text" class="form-control" id="mongodb-host" placeholder="your-mongodb-host.com">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">MongoDB Port</label>
+                                    <input type="number" class="form-control" id="mongodb-port" placeholder="27017">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">MongoDB Database</label>
+                                    <input type="text" class="form-control" id="mongodb-database" placeholder="rpger">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">MongoDB Username (optional)</label>
+                                    <input type="text" class="form-control" id="mongodb-username" placeholder="username">
+                                </div>
+                                <div class="mb-3">
+                                    <label class="form-label">MongoDB Password (optional)</label>
+                                    <div class="input-group">
+                                        <input type="password" class="form-control" id="mongodb-password" placeholder="password">
+                                        <button class="btn btn-outline-secondary" type="button" onclick="togglePasswordVisibility('mongodb-password')">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mb-3">
+                                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="testDatabaseConnections()">
+                                        <i class="fas fa-check-circle"></i> Test Connections
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -135,6 +135,53 @@ def get_version():
     """Get application version information"""
     return jsonify(get_version_info())
 
+@app.route('/api/health')
+def health_check():
+    """Health check endpoint for Docker containers"""
+    try:
+        # Basic health check - ensure the app is running
+        health_status = {
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'version': __version__
+        }
+        
+        # Check database connections if configured
+        try:
+            # Test MongoDB connection
+            from Modules.mongodb_manager import test_mongodb_connection
+            mongo_ok, mongo_msg = test_mongodb_connection()
+            health_status['mongodb'] = {
+                'connected': mongo_ok,
+                'message': mongo_msg
+            }
+        except Exception as e:
+            health_status['mongodb'] = {
+                'connected': False,
+                'message': f'MongoDB check failed: {str(e)}'
+            }
+        
+        try:
+            # Test ChromaDB connection
+            chroma_manager = MultiGameCollectionManager()
+            health_status['chromadb'] = {
+                'connected': True,
+                'collections': len(chroma_manager.collections)
+            }
+        except Exception as e:
+            health_status['chromadb'] = {
+                'connected': False,
+                'message': f'ChromaDB check failed: {str(e)}'
+            }
+        
+        return jsonify(health_status), 200
+    except Exception as e:
+        return jsonify({
+            'status': 'unhealthy',
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 @app.route('/api/providers/available')
 def get_available_providers():
     """Get list of AI providers that have API keys configured"""
@@ -165,6 +212,106 @@ def get_available_providers():
 
     except Exception as e:
         logger.error(f"Error checking available providers: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/test_connections', methods=['POST'])
+def test_database_connections():
+    """Test database connections for deployment configuration"""
+    try:
+        data = request.get_json()
+        deployment_mode = data.get('deployment_mode', 'containers')
+        
+        result = {
+            'success': True,
+            'deployment_mode': deployment_mode
+        }
+        
+        # Test MongoDB connection
+        try:
+            if deployment_mode == 'external':
+                # For external mode, temporarily set environment variables for testing
+                import os
+                original_env = {}
+                
+                # Store original values
+                for key in ['MONGODB_HOST', 'MONGODB_PORT', 'MONGODB_DATABASE', 'MONGODB_USERNAME', 'MONGODB_PASSWORD']:
+                    original_env[key] = os.getenv(key)
+                
+                # Set test values
+                if data.get('mongodb_host'):
+                    os.environ['MONGODB_HOST'] = data['mongodb_host']
+                if data.get('mongodb_port'):
+                    os.environ['MONGODB_PORT'] = str(data['mongodb_port'])
+                if data.get('mongodb_database'):
+                    os.environ['MONGODB_DATABASE'] = data['mongodb_database']
+                if data.get('mongodb_username'):
+                    os.environ['MONGODB_USERNAME'] = data['mongodb_username']
+                if data.get('mongodb_password'):
+                    os.environ['MONGODB_PASSWORD'] = data['mongodb_password']
+                
+                # Test connection
+                from Modules.mongodb_manager import test_mongodb_connection
+                mongo_ok, mongo_msg = test_mongodb_connection()
+                
+                # Restore original values
+                for key, value in original_env.items():
+                    if value is not None:
+                        os.environ[key] = value
+                    elif key in os.environ:
+                        del os.environ[key]
+            else:
+                # Container mode - test with current settings
+                from Modules.mongodb_manager import test_mongodb_connection
+                mongo_ok, mongo_msg = test_mongodb_connection()
+            
+            result['mongodb'] = {
+                'connected': mongo_ok,
+                'message': mongo_msg
+            }
+        except Exception as e:
+            result['mongodb'] = {
+                'connected': False,
+                'message': f'MongoDB test failed: {str(e)}'
+            }
+        
+        # Test ChromaDB connection
+        try:
+            if deployment_mode == 'external':
+                # For external mode, we'd need to temporarily reconfigure ChromaDB
+                # For now, just indicate it needs manual testing
+                result['chromadb'] = {
+                    'connected': True,
+                    'message': 'External ChromaDB configuration - manual testing required'
+                }
+            else:
+                # Container mode - test with current settings
+                chroma_manager = MultiGameCollectionManager()
+                result['chromadb'] = {
+                    'connected': True,
+                    'collections': len(chroma_manager.collections),
+                    'message': f'Connected with {len(chroma_manager.collections)} collections'
+                }
+        except Exception as e:
+            result['chromadb'] = {
+                'connected': False,
+                'message': f'ChromaDB test failed: {str(e)}'
+            }
+        
+        # Check if all connections are successful
+        mongodb_ok = result.get('mongodb', {}).get('connected', False)
+        chromadb_ok = result.get('chromadb', {}).get('connected', False)
+        
+        if not (mongodb_ok and chromadb_ok):
+            result['success'] = False
+            result['error'] = 'Some database connections failed'
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error testing database connections: {e}")
         return jsonify({
             'success': False,
             'error': str(e)

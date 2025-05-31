@@ -2090,6 +2090,85 @@ function browseCollection(dbType, collectionName) {
     loadCollectionPage(dbType, collectionName, 0, 5);
 }
 
+// Toggle deployment mode UI
+function toggleDeploymentMode() {
+    const containerMode = document.getElementById('mode-containers').checked;
+    const containerSettings = document.getElementById('container-db-settings');
+    const externalSettings = document.getElementById('external-db-settings');
+    
+    if (containerMode) {
+        containerSettings.style.display = 'block';
+        externalSettings.style.display = 'none';
+    } else {
+        containerSettings.style.display = 'none';
+        externalSettings.style.display = 'block';
+    }
+}
+
+// Test database connections
+function testDatabaseConnections() {
+    const testButton = document.querySelector('button[onclick="testDatabaseConnections()"]');
+    const originalText = testButton.innerHTML;
+    
+    testButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Testing...';
+    testButton.disabled = true;
+    
+    // Get current deployment mode
+    const isContainerMode = document.getElementById('mode-containers').checked;
+    
+    let testData = {
+        deployment_mode: isContainerMode ? 'containers' : 'external'
+    };
+    
+    // Add external database settings if in external mode
+    if (!isContainerMode) {
+        testData.chromadb_host = document.getElementById('chromadb-host').value;
+        testData.chromadb_port = document.getElementById('chromadb-port').value;
+        testData.mongodb_host = document.getElementById('mongodb-host').value;
+        testData.mongodb_port = document.getElementById('mongodb-port').value;
+        testData.mongodb_database = document.getElementById('mongodb-database').value;
+        testData.mongodb_username = document.getElementById('mongodb-username').value;
+        testData.mongodb_password = document.getElementById('mongodb-password').value;
+    }
+    
+    fetch('/api/test_connections', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(testData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showToast('Database connections successful', 'success');
+            
+            // Show detailed results
+            let resultText = 'Connection Test Results:\n';
+            if (data.mongodb) {
+                resultText += `MongoDB: ${data.mongodb.connected ? '✅ Connected' : '❌ Failed'}\n`;
+                if (data.mongodb.message) resultText += `  ${data.mongodb.message}\n`;
+            }
+            if (data.chromadb) {
+                resultText += `ChromaDB: ${data.chromadb.connected ? '✅ Connected' : '❌ Failed'}\n`;
+                if (data.chromadb.message) resultText += `  ${data.chromadb.message}\n`;
+            }
+            
+            console.log(resultText);
+        } else {
+            showToast(`Connection test failed: ${data.error}`, 'error');
+        }
+    })
+    .catch(error => {
+        console.error('Connection test error:', error);
+        showToast('Connection test failed: ' + error.message, 'error');
+    })
+    .finally(() => {
+        testButton.innerHTML = originalText;
+        testButton.disabled = false;
+    });
+}
+
 // Load collection page with pagination
 function loadCollectionPage(dbType, collectionName, skip = 0, limit = 5) {
     // Show loading state

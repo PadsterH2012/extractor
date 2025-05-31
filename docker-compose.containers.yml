@@ -1,0 +1,76 @@
+services:
+  app:
+    depends_on:
+      - mongodb
+      - chromadb
+    environment:
+      - MONGODB_HOST=mongodb
+      - MONGODB_PORT=27017
+      - MONGODB_DATABASE=rpger
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - SETUP_MODE=containers
+
+  mongodb:
+    image: mongo:7.0
+    container_name: extractor-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./docker/mongodb/init:/docker-entrypoint-initdb.d:ro
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=extractor123
+      - MONGO_INITDB_DATABASE=rpger
+    restart: unless-stopped
+    networks:
+      - extractor-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  chromadb:
+    image: chromadb/chroma:0.4.15
+    container_name: extractor-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadb_data:/chroma/data
+    environment:
+      - CHROMA_SERVER_HOST=0.0.0.0
+      - CHROMA_SERVER_HTTP_PORT=8000
+      - PERSIST_DIRECTORY=/chroma/data
+    restart: unless-stopped
+    networks:
+      - extractor-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  nginx:
+    image: nginx:alpine
+    container_name: extractor-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    restart: unless-stopped
+    networks:
+      - extractor-network
+
+volumes:
+  mongodb_data:
+    driver: local
+  chromadb_data:
+    driver: local

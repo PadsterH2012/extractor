@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    container_name: extractor-app
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./documents:/app/documents
+      - ./.env:/app/.env:ro
+    environment:
+      - FLASK_ENV=production
+      - FLASK_DEBUG=false
+      - PYTHONPATH=/app
+    restart: unless-stopped
+    networks:
+      - extractor-network
+
+networks:
+  extractor-network:
+    driver: bridge
